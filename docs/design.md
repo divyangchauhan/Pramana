@@ -455,10 +455,10 @@ This produces: *"The pipeline confirmed T known real vulnerabilities with execut
 The classic way this project dies is three weeks of orchestration plumbing while it never catches a real bug. Avoid that by building depth before breadth.
 
 **Phase 0 — Vertical slice (single loop, no orchestration).**
-One contract, one *known* bug. A single `run_agent` call with all tools, whose prompt does find → write PoC → report inline. Success = it catches that one bug end to end and emits a report. No multi-agent anything yet.
+Establish the evaluation baseline with a minimal harness, 3–5 known-bug fixtures, and a stable pipeline entry point. Implement the pipeline as a single `run_agent` call with all tools, whose prompt does find → write PoC → report inline. Success = the harness records a true-positive finding count from executable PoCs and the pipeline emits a report for each fixture.
 
 **Phase 1 — Split out the verifier.**
-Refactor into two `run_agent` calls: finder → verifier, with the verifier context-isolated and forced to produce an executable PoC. Add 3–5 known-bug fixtures. **Now you can measure your first true-positive finding count.**
+Refactor the pipeline into two `run_agent` calls: finder → verifier, with the verifier context-isolated and required to produce an executable PoC. Use the Phase 0 fixtures and baseline results to verify that the architectural change does not regress the true-positive finding count.
 
 **Phase 2 — Split finder + reporter; add grounding + routing.**
 Wire Slither in front of the finder. Add provider adapters, configurable per-role model routing, and Slither/compile caching. Clean up the two JSON contracts. Run the same fixtures against at least two provider/model configurations — both to catch adapter-specific behavior and to start the per-role model comparison that §8's harness exists to run.
