@@ -89,6 +89,9 @@ def forge_test(
             return result  # definitive pass/fail — never retried
         if attempt < retries:
             time.sleep(backoff * (attempt + 1))
+    # The loop always runs at least once and only reaches here with `result`
+    # set (a transient error on the final attempt re-raises above).
+    assert result is not None
     return result  # exhausted retries with no definitive result
 
 

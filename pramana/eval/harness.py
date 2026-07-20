@@ -22,6 +22,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..agents.loop import TraceFn
 from ..config import AgentConfig
 from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
@@ -237,10 +238,11 @@ def run_agent_eval(
         ctx = ToolContext(
             workspace=audit_ws, forge_timeout=forge_timeout, forge_retries=forge_retries
         )
-        trace = None
+        trace: TraceFn | None = None
         if verbose:
-            def trace(e: dict, _name: str = fx.name) -> None:
+            def _trace(e: dict, _name: str = fx.name) -> None:
                 print(f"  [{_name}] {e}", file=sys.stderr)
+            trace = _trace
         try:
             result = audit(adapter, config, ctx, fx.contract, trace=trace)
         except Exception as exc:  # keep the sweep going; record the failure

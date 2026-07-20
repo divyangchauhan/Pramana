@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "ruff>=0.6",
     "pytest>=8",
+    "pyright>=1.1.390",
 ]
 
 [tool.uv]
@@ -27,6 +28,16 @@ package = false
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "pramana/eval/foundry_template/dependencies",
+]
 
 [tool.ruff]
 line-length = 100

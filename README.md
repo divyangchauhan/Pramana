@@ -210,8 +210,9 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest            # 37 offline tests, no network/keys
-uv run ruff check pramana tests
+uv run pytest                      # 37 offline tests, no network/keys
+uv run ruff check pramana tests    # lint
+uv run pyright pramana tests       # type check (clean)
 ```
 
 Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching), the grading paths (a non-passing PoC or wrong class never counts), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for all three labs, and env validation. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
