@@ -1,0 +1,14 @@
+{
+  "name": "unprotected-owner",
+  "contract": "src/Wallet.sol",
+  "reference_poc": "reference/WalletExploit.t.sol",
+  "inspiration": "Parity multisig unprotected initializer (2017)",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "access-control",
+      "location": "Wallet.initOwner()",
+      "description": "initOwner() has no access control or initialized guard, so any account can seize ownership and then withdraw the entire balance."
+    }
+  ]
+}

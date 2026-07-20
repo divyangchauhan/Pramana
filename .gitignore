@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Foundry build artifacts (in generated eval workspaces)
+out/
+cache/
+broadcast/
+.gas-snapshot
+
+# Soldeer-fetched Foundry dependencies (declared in foundry.toml + soldeer.lock,
+# restored with `forge soldeer install` — not vendored into the repo)
+dependencies/
+
+# Local run outputs
+*.log
+
+# Generated eval workspaces (e.g. `--work-dir ./runs`) — throwaway Foundry
+# projects with the agent's PoCs and build artifacts; reproducible, not source.
+/runs/
+
+# Secrets — keep .env.example tracked, never the real .env
+.env
+.env.*
+!.env.example
