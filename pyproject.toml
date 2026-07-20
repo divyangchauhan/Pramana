@@ -1,0 +1,40 @@
+[project]
+name = "pramana"
+version = "0.0.0"
+description = "Pramana — multi-agent smart-contract audit pipeline (Phase 0 vertical slice)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.69",
+    "openai>=1.60",
+    "pydantic>=2.6",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8",
+]
+
+[tool.uv]
+# This is an application, not a library: don't build/install `pramana` itself —
+# it is imported from the working directory. `uv run` only provisions deps.
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Vendored dependency — not our code.
+extend-exclude = ["pramana/eval/foundry_template/lib"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# prompts.py is mostly literal prompt text; line length is not meaningful there.
+"pramana/agents/prompts.py" = ["E501"]

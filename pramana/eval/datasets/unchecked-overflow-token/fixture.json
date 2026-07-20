@@ -1,0 +1,14 @@
+{
+  "name": "unchecked-overflow-token",
+  "contract": "src/Token.sol",
+  "reference_poc": "reference/TokenExploit.t.sol",
+  "inspiration": "BeautyChain (BEC) batchOverflow (2018)",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "integer-overflow",
+      "location": "Token.batchTransfer()",
+      "description": "The transfer total receivers.length * amount is computed in an unchecked block; a crafted amount overflows it to a tiny value, bypasses the balance check, and mints tokens out of thin air."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "tx-origin-wallet",
+  "contract": "src/TxOriginWallet.sol",
+  "reference_poc": "reference/TxOriginExploit.t.sol",
+  "inspiration": "SWC-115 tx.origin authentication",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "tx-origin",
+      "location": "TxOriginWallet.transferTo()",
+      "description": "Authorization uses tx.origin instead of msg.sender, so a phishing contract the owner is tricked into calling can move the wallet's funds."
+    }
+  ]
+}

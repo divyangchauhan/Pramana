@@ -1,0 +1,14 @@
+{
+  "name": "reentrancy-vault",
+  "contract": "src/EtherStore.sol",
+  "reference_poc": "reference/EtherStoreExploit.t.sol",
+  "inspiration": "The DAO (2016)",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "reentrancy",
+      "location": "EtherStore.withdraw()",
+      "description": "External ETH transfer occurs before the caller's balance is zeroed, allowing a malicious receiver to re-enter withdraw() and drain all deposits."
+    }
+  ]
+}
