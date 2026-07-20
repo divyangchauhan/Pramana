@@ -26,6 +26,9 @@ class KnownBug:
     vuln_class: str
     location: str
     description: str
+    # Per-bug reference PoC (relative to the fixture dir). When absent, the
+    # fixture-level `reference_poc` is used. Multi-bug fixtures set one per bug.
+    reference_poc: str | None = None
 
 
 @dataclass

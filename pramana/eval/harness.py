@@ -25,7 +25,7 @@ from pathlib import Path
 from ..config import AgentConfig
 from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
-from ..tools.files import ToolContext
+from ..tools.files import ToolContext, ToolError
 from ..tools.foundry import ForgeResult, forge_test
 from .workspace import (
     DATASETS_DIR,
@@ -89,14 +89,17 @@ class FixtureRow:
 
 
 def _verify_poc(
-    fixture: Fixture, poc_file: Path | None, grading_dir: Path, timeout: int
+    fixture: Fixture, poc_file: Path | None, grading_dir: Path, timeout: int, retries: int
 ) -> ForgeResult:
     if poc_file is None or not poc_file.exists():
         return ForgeResult(ran=False, passed=False, output="PoC file not found")
     ws = build_workspace(fixture, grading_dir)  # pristine target source
     dest = ws / "test" / poc_file.name
     dest.write_text(poc_file.read_text())
-    return forge_test(ws, f"test/{poc_file.name}", timeout=timeout)
+    try:
+        return forge_test(ws, f"test/{poc_file.name}", timeout=timeout, retries=retries)
+    except ToolError as exc:  # forge missing / persistent flakiness -> not a pass
+        return ForgeResult(ran=False, passed=False, output=f"forge error: {exc}")
 
 
 def grade(
@@ -106,6 +109,7 @@ def grade(
     config_label: str,
     *,
     forge_timeout: int = 300,
+    forge_retries: int = 2,
 ) -> FixtureRow:
     known = fixture.known_bugs
     matched_bug_ids: set[str] = set()
@@ -122,7 +126,9 @@ def grade(
         poc_ran = poc_passed = False
         if probe.verdict == "confirmed":
             n_confirmed += 1
-            res = _verify_poc(fixture, probe.poc_file, grading_root / probe.id, forge_timeout)
+            res = _verify_poc(
+                fixture, probe.poc_file, grading_root / probe.id, forge_timeout, forge_retries
+            )
             poc_ran, poc_passed = res.ran, res.passed
             confirmed_pass += int(poc_passed)
 
@@ -167,12 +173,16 @@ def grade(
 
 
 def probes_from_reference(fixture: Fixture) -> list[Probe]:
-    """Self-check: one confirmed probe per known bug, pointed at the reference PoC."""
-    ref = fixture.dir / fixture.reference_poc if fixture.reference_poc else None
-    return [
-        Probe(id=f"REF-{kb.id}", vuln_class=kb.vuln_class, verdict="confirmed", poc_file=ref)
-        for kb in fixture.known_bugs
-    ]
+    """Self-check: one confirmed probe per known bug, pointed at its reference PoC
+    (per-bug ``reference_poc`` if set, else the fixture-level one)."""
+    probes: list[Probe] = []
+    for kb in fixture.known_bugs:
+        ref_rel = kb.reference_poc or fixture.reference_poc
+        ref = fixture.dir / ref_rel if ref_rel else None
+        probes.append(
+            Probe(id=f"REF-{kb.id}", vuln_class=kb.vuln_class, verdict="confirmed", poc_file=ref)
+        )
+    return probes
 
 
 def probes_from_audit(output, audit_workspace: Path) -> list[Probe]:
@@ -189,12 +199,19 @@ def probes_from_audit(output, audit_workspace: Path) -> list[Probe]:
 
 
 def run_self_check(
-    fixtures: list[Fixture], work_root: Path, forge_timeout: int
+    fixtures: list[Fixture], work_root: Path, forge_timeout: int, forge_retries: int = 2
 ) -> list[FixtureRow]:
     rows: list[FixtureRow] = []
     for fx in fixtures:
         probes = probes_from_reference(fx)
-        row = grade(fx, probes, work_root / fx.name, "reference-poc", forge_timeout=forge_timeout)
+        row = grade(
+            fx,
+            probes,
+            work_root / fx.name,
+            "reference-poc",
+            forge_timeout=forge_timeout,
+            forge_retries=forge_retries,
+        )
         rows.append(row)
     return rows
 
@@ -205,6 +222,7 @@ def run_agent_eval(
     work_root: Path,
     forge_timeout: int,
     *,
+    forge_retries: int = 2,
     verbose: bool = False,
 ) -> list[FixtureRow]:
     from ..pipeline import audit  # local import: needs a provider SDK
@@ -216,7 +234,9 @@ def run_agent_eval(
     for fx in fixtures:
         audit_ws = work_root / fx.name / "audit"
         build_workspace(fx, audit_ws)
-        ctx = ToolContext(workspace=audit_ws, forge_timeout=forge_timeout)
+        ctx = ToolContext(
+            workspace=audit_ws, forge_timeout=forge_timeout, forge_retries=forge_retries
+        )
         trace = None
         if verbose:
             def trace(e: dict, _name: str = fx.name) -> None:
@@ -247,6 +267,7 @@ def run_agent_eval(
             work_root / fx.name / "grade",
             config.agent.label(),
             forge_timeout=forge_timeout,
+            forge_retries=forge_retries,
         )
         row.report_markdown = result.output.report_markdown
         rows.append(row)
@@ -290,6 +311,25 @@ def print_report(rows: list[FixtureRow]) -> None:
           f"{total_tp} / {total_known} known bugs\n")
 
 
+def write_reports(rows: list[FixtureRow], report_dir: Path) -> int:
+    """Write each fixture's audit report (the agent's markdown) to
+    ``<report_dir>/<fixture>.md``. Returns the number of reports written."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for r in rows:
+        if not r.report_markdown.strip():
+            continue  # self-check / errored runs have no agent report
+        header = (
+            f"# Audit report — {r.fixture}\n\n"
+            f"- **Config:** {r.config}\n"
+            f"- **True positives:** {r.true_positive_findings} / {r.n_known_bugs} known bugs\n"
+            f"- **Confirmed / PoC-verified:** {r.n_confirmed} / {r.confirmed_poc_pass}\n\n---\n\n"
+        )
+        (report_dir / f"{r.fixture}.md").write_text(header + r.report_markdown)
+        written += 1
+    return written
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pramana Phase 0 evaluation harness")
     parser.add_argument("--self-check", action="store_true",
@@ -301,9 +341,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--datasets", type=Path, default=DATASETS_DIR)
     parser.add_argument("--work-dir", type=Path, help="where to build workspaces (default: temp)")
     parser.add_argument("--forge-timeout", type=int, default=300)
+    parser.add_argument("--forge-retries", type=int, default=2,
+                        help="retries for transient forge/anvil flakiness (default 2)")
     parser.add_argument("--max-turns", type=int, default=25)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--json", type=Path, help="write full results JSON here")
+    parser.add_argument("--report-dir", type=Path,
+                        help="write a per-fixture audit report (report.md) here")
     parser.add_argument("--verbose", action="store_true", help="stream agent tool calls to stderr")
     args = parser.parse_args(argv)
 
@@ -337,14 +381,19 @@ def main(argv: list[str] | None = None) -> int:
     work_root.mkdir(parents=True, exist_ok=True)
 
     if args.self_check:
-        rows = run_self_check(fixtures, work_root, args.forge_timeout)
+        rows = run_self_check(fixtures, work_root, args.forge_timeout, args.forge_retries)
     else:
         config = AgentConfig.for_provider(
             args.provider, args.model, max_turns=args.max_turns, max_tokens=args.max_tokens
         )
         try:
             rows = run_agent_eval(
-                fixtures, config, work_root, args.forge_timeout, verbose=args.verbose
+                fixtures,
+                config,
+                work_root,
+                args.forge_timeout,
+                forge_retries=args.forge_retries,
+                verbose=args.verbose,
             )
         except Exception as exc:  # provider setup / auth / capability failure
             print(f"error: could not start {config.agent.label()} run: {exc}", file=sys.stderr)
@@ -359,6 +408,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         args.json.write_text(json.dumps(summarize(rows), indent=2))
         print(f"wrote {args.json}")
+    if args.report_dir:
+        n = write_reports(rows, args.report_dir)
+        print(f"wrote {n} audit report(s) to {args.report_dir}")
     return 0
 
 

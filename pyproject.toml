@@ -3,6 +3,8 @@ name = "pramana"
 version = "0.0.0"
 description = "Pramana — multi-agent smart-contract audit pipeline (Phase 0 vertical slice)"
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Divyang Chauhan" }]
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.69",
