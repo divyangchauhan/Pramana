@@ -32,7 +32,7 @@ That single design choice — *executable proof over model confidence* — is th
 
 The headline metric is **true-positive findings confirmed with an executable PoC** — a finding the harness *independently re-runs and watches pass* in a clean workspace, matched to a known real vulnerability.
 
-Full corpus, live with `claude-opus-4-8`, **repeated 3× — identical every run**:
+Full corpus, live with `claude-opus-4-8` on the two-agent pipeline, **repeated 3× — identical every run**:
 
 | Fixture | Vulnerability class(es) | Known bugs | Proven with PoC | True positives |
 |---|---|:---:|:---:|:---:|
@@ -45,16 +45,36 @@ Full corpus, live with `claude-opus-4-8`, **repeated 3× — identical every run
 
 **6 / 6 true positives · recall 1.00 · precision 1.00 · 0 false positives on the negative control.** Every finding came with a Foundry exploit that the harness re-ran, from scratch, against the untouched target contract — including the composite `bank-multi`, where both distinct bugs were found and proven independently.
 
-The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the agent wrote a reentrancy exploit, ran it, **watched it fail**, and reported no vulnerability:
+The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the pipeline reports nothing — the finder reads the ordering, sees the effect applied before the interaction, and proposes no candidate at all, so no verifier is ever invoked.
+
+The single-agent Phase 0 run reached the same verdict by a more legible route: it wrote a reentrancy exploit, ran it, and **watched it fail**.
 
 > `withdraw()` zeroes the balance (effect) **before** the external call (interaction). A reentrant call finds a zero balance and reverts. […] The test PASSES demonstrating the exploit does NOT work.
 > — [`baselines/phase-0/reports/reentrancy-vault-patched.md`](baselines/phase-0/reports/reentrancy-vault-patched.md)
 
-That is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported.
+Either way it is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported. Worth noting honestly: the split makes the *clean-contract* report thinner, since a claim filtered out at the proposal stage leaves no record of what was checked. That is a deliverable-quality gap no current metric captures, and a job for the Phase 2 reporter.
 
-📊 **[Full baseline record →](baselines/phase-0/)** — all 3 runs, per-fixture stability, pinned commit and config, and the regression gate later phases are measured against. The agent's own audit reports for every fixture are committed alongside it.
+📊 **[Full baseline record →](baselines/phase-1/)** — all 3 runs, per-fixture stability, pinned commit and config, and the regression check against [Phase 0](baselines/phase-0/). The agent's own audit reports for every fixture are committed alongside it.
 
 An offline `--self-check` reproduces the entire scoring pipeline (workspace build → `forge test` → class match → count) with **no API key required**.
+
+### What the eval caught that recall could not
+
+Every architectural change is checked against the previous phase's recorded baseline, as a floor and a ceiling rather than an average — a lucky run must not mask a bad one:
+
+```
+$ uv run python -m pramana.eval.baseline --runs runs/*.json \
+      --out-dir baselines/phase-1 --against baselines/phase-0/baseline.json
+
+✅ No regression
+- True positives:                floor 6 vs baseline floor 6      — gate held
+- Negative-control false positives:  worst 0 vs baseline ceiling 0  — gate held
+- Unmatched confirmed findings:      worst 0 vs baseline ceiling 0  — gate held
+```
+
+That third line exists because of a bug the first two missed. Splitting the pipeline held 6/6 true positives and 0 negative-control false positives — a clean pass — while quietly reporting the `tx.origin` bug **twice**: once as `tx-origin`, once as `access-control`, with two PoCs demonstrating the same phishing attack. The duplicate matched no *unclaimed* known bug, so it disappeared from every number being watched.
+
+It is a direct consequence of context isolation: each verifier sees exactly one claim and cannot know another claim is the same bug. The fix was at the finder (one finding per distinct root cause), but the lesson was the metric — **recall is structurally blind to duplicates**, so a pipeline can score 6/6 while flooding its report. `unmatched_confirmed_findings` now counts them and gates them.
 
 ---
 
@@ -63,36 +83,51 @@ An offline `--self-check` reproduces the entire scoring pipeline (workspace buil
 ```mermaid
 flowchart TD
     C["Solidity contract"] --> SL["run_slither → prioritized leads"]
-    SL --> AG
+    SL --> F
 
-    subgraph AG["run_agent · one bounded, provider-neutral loop"]
+    subgraph F["Anumana · finder — read-only"]
       direction LR
-      LLM["LLM<br/>Claude · GPT · Kimi"] -->|"tool calls"| T["read_file · run_slither<br/>write_file · run_foundry_test"]
-      T -->|"results"| LLM
+      FL["LLM"] -->|"tool calls"| FT["read_file · run_slither"]
+      FT -->|"results"| FL
     end
 
-    AG --> OUT["findings JSON + audit report"]
+    F --> CLAIM{"bare claim only<br/>contract · location<br/>vuln_class · hypothesis"}
+
+    subgraph V["Khandana · verifier — one per finding, fresh context"]
+      direction LR
+      VL["LLM"] -->|"tool calls"| VT["read_file · write_file<br/>run_foundry_test"]
+      VT -->|"results"| VL
+    end
+
+    CLAIM --> V
+    V --> OUT["confirmed / refuted / inconclusive<br/>+ audit report"]
     OUT --> EV["eval harness"]
     EV -->|"re-runs each confirmed PoC<br/>in a pristine workspace"| TP["✅ true positives"]
 ```
 
 A single audit, start to finish:
 
-1. **Ground.** [Slither](https://github.com/crytic/slither) runs once and its detector hits seed the agent — *leads to investigate, never findings on their own.*
-2. **Investigate.** The agent reads the actual Solidity (`read_file`), traces the flow, and forms a falsifiable exploit hypothesis grounded in code it actually inspected.
-3. **Prove.** For each hypothesis it writes a Foundry PoC (`write_file`) and runs it (`run_foundry_test`). Its default assumption is that the claim is *false* — only a passing, assertion-backed test flips it to `confirmed`.
-4. **Report.** It emits a strict JSON payload (findings + markdown report), validated at the boundary with Pydantic.
+1. **Ground.** [Slither](https://github.com/crytic/slither) runs once and its detector hits seed the finder — *leads to investigate, never findings on their own.*
+2. **Investigate.** The finder reads the actual Solidity (`read_file`), traces the flow, and proposes falsifiable exploit hypotheses grounded in code it actually inspected. It has no ability to write or execute anything.
+3. **Isolate.** Each hypothesis is passed to a separate verifier as a **bare claim** — contract, location, class, hypothesis. The finder's notes and severity guess are withheld.
+4. **Disprove.** The verifier's default assumption is that the claim is *false*. It writes a Foundry PoC (`write_file`) and runs it (`run_foundry_test`); only a passing, assertion-backed test flips the verdict to `confirmed`. Otherwise it returns `refuted` or `inconclusive`.
 5. **Score.** The harness rebuilds a fresh workspace with the *pristine* target, copies in only the agent's PoC, and re-runs it — so a finding counts only if the exploit truly executes.
 
-Here's a real transcript from the reentrancy audit (`--verbose`), including the agent debugging its own PoC:
+**Why the split matters.** The isolation is structural, not prompted: each verification is its own `run_agent` call with a physically separate `messages` list, seeded from a whitelist (`contracts.bare_claim`). There is no channel through which the finder's confidence can reach the verifier — and because the seed is a whitelist, a field added to `Finding` later cannot silently start leaking. Tool scope enforces the same boundary: the finder *cannot* prove its own hypothesis, because it has no `write_file`.
+
+Here's a real audit (`--verbose`), including the verifier debugging its own PoC:
 
 ```
-turn 0  read_file      src/EtherStore.sol
-turn 1  write_file     test/F-001.t.sol        # first PoC attempt
-turn 2  run_foundry_test                        # ❌ fails: ETH-seeding bug in the test
-turn 3  write_file     test/F-001.t.sol        # self-corrected
-turn 4  run_foundry_test                        # ✅ passes: vault drained 6→0
-turn 5  (final JSON)   confirmed · reentrancy · PoC test/F-001.t.sol
+[finder]    read_file        src/EtherStore.sol
+[finder]    read_file        src/EtherStore.sol      # traces withdraw() call order
+[finder]    (final JSON)     F-001 · reentrancy · "external call precedes state update"
+                             ↓  bare claim only — notes and severity guess withheld
+[verifier]  read_file        src/EtherStore.sol      # verifies the claim against the code
+[verifier]  write_file       test/F-001.t.sol        # first PoC attempt
+[verifier]  run_foundry_test                         # ❌ fails: ETH-seeding bug in the test
+[verifier]  write_file       test/F-001.t.sol        # self-corrected
+[verifier]  run_foundry_test                         # ✅ passes: vault drained 6→0
+[verifier]  (final JSON)     confirmed · high · PoC test/F-001.t.sol
 ```
 
 ---
@@ -145,15 +180,15 @@ uv run python -m pramana.eval.harness --self-check
 ```
 
 ```
-fixture                    cfg                    cand conf  poc+  TP  recall
------------------------------------------------------------------------------
-bank-multi                 reference-poc             2    2     2   2    1.00
-reentrancy-vault           reference-poc             1    1     1   1    1.00
-reentrancy-vault-patched   reference-poc             0    0     0   0       -
-tx-origin-wallet           reference-poc             1    1     1   1    1.00
-unchecked-overflow-token   reference-poc             1    1     1   1    1.00
-unprotected-owner          reference-poc             1    1     1   1    1.00
------------------------------------------------------------------------------
+fixture                    cfg                    cand  ref conf  poc+  TP  recall
+----------------------------------------------------------------------------------
+bank-multi                 reference-poc             2    0    2     2   2    1.00
+reentrancy-vault           reference-poc             1    0    1     1   1    1.00
+reentrancy-vault-patched   reference-poc             0    0    0     0   0       -
+tx-origin-wallet           reference-poc             1    0    1     1   1    1.00
+unchecked-overflow-token   reference-poc             1    0    1     1   1    1.00
+unprotected-owner          reference-poc             1    0    1     1   1    1.00
+----------------------------------------------------------------------------------
 HEADLINE — true-positive findings confirmed with executable PoCs: 6 / 6 known bugs
 NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
 ```
@@ -166,6 +201,8 @@ A `recall` of `-` marks a negative control: it has no known bugs, so recall is u
 cp .env.example .env         # fill in ANTHROPIC_API_KEY (or OPENAI / MOONSHOT)
 uv run python -m pramana.eval.harness --provider anthropic
 ```
+
+`--pipeline phase1` (finder → isolated verifier) is the default. Pass `--pipeline phase0` to run the original single-agent slice — both stay runnable so the architectural change can be *measured*, not asserted. `ref` in the table counts claims the verifier actively refuted.
 
 **Capture a baseline** — repeat the run, then fold the results into a committed regression record (the pipeline is nondeterministic, so a single run is a point estimate, not a baseline):
 
@@ -218,10 +255,10 @@ Each adapter validates its model at startup and never silently falls back to ano
 ```
 pramana/
 ├── providers/          # canonical adapter boundary (base) + anthropic / openai / kimi
-├── agents/             # run_agent (bounded, isolated loop) + Phase 0 prompt & tool schemas
+├── agents/             # run_agent (bounded, isolated loop) + finder / verifier prompts & tool scopes
 ├── tools/              # sandboxed read_file / write_file / run_slither / run_foundry_test
 ├── contracts.py        # Pydantic Finding / Verdict / Phase0Output + boundary parsing
-├── pipeline.py         # Phase 0 audit() — single-loop entry point
+├── pipeline.py         # the orchestrator — audit_phase0 / audit_phase1
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
 └── eval/
@@ -229,9 +266,11 @@ pramana/
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     ├── harness.py      # runs audit() over fixtures, counts true positives
-    └── baseline.py     # folds repeated runs into a committed regression baseline
+    └── baseline.py     # folds repeated runs into a baseline; gates later phases
+baselines/phase-0/      # recorded baselines + the agent's audit reports
+baselines/phase-1/
 baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
-tests/                  # 42 offline tests (parsing, matching, grading, retries, wire translation, env, negative control)
+tests/                  # 88 offline tests (parsing, grading, isolation, tool scope, retries, wire translation, negative control)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -241,7 +280,7 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 42 offline tests, no network/keys
+uv run pytest                      # 88 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```
@@ -254,9 +293,9 @@ Tests cover boundary JSON parsing, vulnerability-class matching (including multi
 
 Pramana is built as a **vertical slice first**, deepening before it widens — every phase is a refactor of a working, demoable system, never a rewrite. Full plan in [`docs/design.md`](docs/design.md).
 
-- **Phase 0 — Vertical slice** ✅ *(this repo)* — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus.
-- **Phase 1 — Split the verifier** — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis. Measured against the [Phase 0 baseline](baselines/phase-0/): it must not drop below 6 true positives or exceed 0 negative-control false positives.
-- **Phase 2 — Finder + reporter + routing** — three specialized agents; per-role model routing swept by the harness; Slither/compile caching.
+- **Phase 0 — Vertical slice** ✅ — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus. [Baseline](baselines/phase-0/).
+- **Phase 1 — Split the verifier** ✅ *(current)* — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis. Gated against the [Phase 0 baseline](baselines/phase-0/) and recorded as its own [Phase 1 baseline](baselines/phase-1/).
+- **Phase 2 — Add the reporter + routing** — a third agent that writes the deliverable (and, seeing every verdict at once, is the natural place to catch cross-finding duplicates); per-role model routing swept by the harness; Slither/compile caching.
 - **Phase 3 — Scale & harden** — public benchmarks, a full paired vulnerable/patched set, structured observability, and cost-per-role reporting.
 
 The three agents have fixed identities — **Anumana** (finder / inference), **Khandana** (verifier / refutation), **Nirnaya** (reporter / conclusion) — the three *pramāṇas* by which a finding becomes proven knowledge.
