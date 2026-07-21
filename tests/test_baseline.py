@@ -208,6 +208,32 @@ def test_comparison_refuses_a_verdict_across_different_corpora(tmp_path):
     assert "Not comparable" in render_comparison(c)
 
 
+def test_comparison_marks_an_unfingerprinted_baseline_as_unverified(tmp_path):
+    """Silence would imply the corpora were checked and matched."""
+    old = aggregate([_run(tmp_path, "o1.json", [_row("a", 1, 1)])], "Phase 0")
+    new_run = _run(tmp_path, "n1.json", [_row("a", 1, 1)])
+    new_run.write_text(json.dumps({**json.loads(new_run.read_text()), "corpus_fingerprint": "bbb"}))
+
+    c = compare(aggregate([new_run], "Phase 1"), old)
+    assert c["corpus_mismatch"] is False
+    assert c["corpus_unverified"] is True
+    assert c["passed"] is True, "advisory, not a failure"
+    assert "could not be confirmed" in render_comparison(c)
+
+
+def test_matching_fingerprints_are_neither_mismatched_nor_unverified(tmp_path):
+    runs = []
+    for name in ("o1.json", "n1.json"):
+        r = _run(tmp_path, name, [_row("a", 1, 1)])
+        r.write_text(json.dumps({**json.loads(r.read_text()), "corpus_fingerprint": "same"}))
+        runs.append(r)
+
+    c = compare(aggregate([runs[1]], "Phase 1"), aggregate([runs[0]], "Phase 0"))
+    assert c["corpus_mismatch"] is False
+    assert c["corpus_unverified"] is False
+    assert "could not be confirmed" not in render_comparison(c)
+
+
 def test_aggregate_refuses_to_mix_runs_from_different_corpora(tmp_path):
     a = _run(tmp_path, "a.json", [_row("a", 1, 1)])
     a.write_text(json.dumps({**json.loads(a.read_text()), "corpus_fingerprint": "aaa"}))

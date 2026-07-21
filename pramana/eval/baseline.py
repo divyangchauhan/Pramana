@@ -293,6 +293,9 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
     base_corpus = baseline.get("corpus_fingerprint")
     cand_corpus = candidate.get("corpus_fingerprint")
     corpus_mismatch = bool(base_corpus and cand_corpus and base_corpus != cand_corpus)
+    # A baseline recorded before fingerprinting existed cannot be *shown* to
+    # describe the same corpus. Surface that rather than implying it was checked.
+    corpus_unverified = not corpus_mismatch and not (base_corpus and cand_corpus)
 
     tp_regression = tp_min < tp_floor
     fp_regression = fp_max > fp_ceiling
@@ -301,6 +304,7 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
         "baseline_corpus": base_corpus,
         "candidate_corpus": cand_corpus,
         "corpus_mismatch": corpus_mismatch,
+        "corpus_unverified": corpus_unverified,
         "unmatched_ceiling": unmatched_ceiling,
         "candidate_unmatched_max": unmatched_max,
         "unmatched_regression": unmatched_regression,
@@ -342,6 +346,14 @@ def render_comparison(c: dict[str, Any]) -> str:
         "",
         verdict,
         "",
+    ]
+    if c.get("corpus_unverified"):
+        lines += [
+            "> ⚠️ The baseline predates corpus fingerprinting, so it could not be "
+            "confirmed to describe the same fixtures. Treat this verdict as advisory.",
+            "",
+        ]
+    lines += [
         f"- True positives: floor **{c['candidate_true_positive_floor']}** vs baseline floor "
         f"**{c['true_positive_floor']}** — "
         + ("REGRESSION" if c["true_positive_regression"] else "gate held"),
