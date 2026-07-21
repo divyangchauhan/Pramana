@@ -32,6 +32,7 @@ from .workspace import (
     DATASETS_DIR,
     Fixture,
     build_workspace,
+    corpus_fingerprint,
     ensure_dependencies_installed,
     load_fixtures,
 )
@@ -299,13 +300,16 @@ def run_agent_eval(
 # --- reporting ---------------------------------------------------------------
 
 
-def summarize(rows: list[FixtureRow]) -> dict:
+def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> dict:
     total_tp = sum(r.true_positive_findings for r in rows)
     total_known = sum(r.n_known_bugs for r in rows)
     controls = [r for r in rows if r.n_known_bugs == 0]
     return {
         "true_positive_findings": total_tp,  # headline number
         "total_known_bugs": total_known,
+        # Pins the corpus these numbers were scored against. Results from
+        # different corpora are not comparable, however similar they look.
+        "corpus_fingerprint": corpus_fingerprint(fixtures) if fixtures else None,
         # Negative controls hold no known bugs, so every confirmed finding on
         # one is unambiguously a false positive.
         "negative_control_fixtures": [r.fixture for r in controls],
@@ -477,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print_report(rows)
     if args.json:
-        args.json.write_text(json.dumps(summarize(rows), indent=2))
+        args.json.write_text(json.dumps(summarize(rows, fixtures), indent=2))
         print(f"wrote {args.json}")
     if args.report_dir:
         n = write_reports(rows, args.report_dir)

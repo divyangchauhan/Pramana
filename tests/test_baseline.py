@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from pramana.eval.baseline import (
     _unmatched_per_run,
     aggregate,
@@ -190,6 +192,30 @@ def test_unmatched_regression_is_caught_while_recall_holds(tmp_path):
     assert c["false_positive_regression"] is False, "no control false positives"
     assert c["unmatched_regression"] is True
     assert c["passed"] is False
+
+
+def test_comparison_refuses_a_verdict_across_different_corpora(tmp_path):
+    """Stripping the bug-explaining comments changed the fixtures, so the old
+    numbers describe a different problem. The gate must say so, not score it."""
+    old_run = _run(tmp_path, "o1.json", [_row("a", 1, 1)])
+    old_run.write_text(json.dumps({**json.loads(old_run.read_text()), "corpus_fingerprint": "aaa"}))
+    new_run = _run(tmp_path, "n1.json", [_row("a", 0, 1)])
+    new_run.write_text(json.dumps({**json.loads(new_run.read_text()), "corpus_fingerprint": "bbb"}))
+
+    c = compare(aggregate([new_run], "Phase 1"), aggregate([old_run], "Phase 0"))
+    assert c["corpus_mismatch"] is True
+    assert c["passed"] is False
+    assert "Not comparable" in render_comparison(c)
+
+
+def test_aggregate_refuses_to_mix_runs_from_different_corpora(tmp_path):
+    a = _run(tmp_path, "a.json", [_row("a", 1, 1)])
+    a.write_text(json.dumps({**json.loads(a.read_text()), "corpus_fingerprint": "aaa"}))
+    b = _run(tmp_path, "b.json", [_row("a", 1, 1)])
+    b.write_text(json.dumps({**json.loads(b.read_text()), "corpus_fingerprint": "bbb"}))
+
+    with pytest.raises(SystemExit, match="different corpora"):
+        aggregate([a, b], "Phase 1")
 
 
 def test_reproduce_command_round_trips_the_pipeline_from_the_label(tmp_path):

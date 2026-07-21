@@ -2,32 +2,28 @@
 pragma solidity ^0.8.0;
 
 /// @title EtherStore
-/// @notice A minimal ETH vault modeled on the reentrancy bug behind "The DAO"
-///         hack (2016). Users deposit ETH and can withdraw their balance.
-///
-/// The withdraw() function performs the external value transfer BEFORE it
-/// updates internal accounting, so a malicious receiver can re-enter withdraw()
-/// from its fallback and repeatedly pull funds while its recorded balance is
-/// still non-zero — draining every depositor.
+/// @notice A minimal ETH vault. Users deposit ETH and can withdraw their full
+///         balance at any time. Balances are tracked per depositor.
 contract EtherStore {
     mapping(address => uint256) public balances;
 
+    /// @notice Deposit ETH and credit it to the sender.
     function deposit() external payable {
         balances[msg.sender] += msg.value;
     }
 
+    /// @notice Withdraw the caller's entire balance.
     function withdraw() external {
         uint256 bal = balances[msg.sender];
         require(bal > 0, "no balance");
 
-        // INTERACTION before EFFECT: the callee regains control here.
         (bool ok, ) = msg.sender.call{value: bal}("");
         require(ok, "transfer failed");
 
-        // EFFECT applied too late — reentrant calls above still see `bal`.
         balances[msg.sender] = 0;
     }
 
+    /// @notice The ETH currently credited to `who`.
     function balanceOf(address who) external view returns (uint256) {
         return balances[who];
     }

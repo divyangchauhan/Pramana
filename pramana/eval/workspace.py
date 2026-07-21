@@ -9,6 +9,7 @@ editing the target.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -62,6 +63,26 @@ def load_fixtures(
             )
         )
     return fixtures
+
+
+def corpus_fingerprint(fixtures: list[Fixture]) -> str:
+    """A short digest of the corpus a run was scored against.
+
+    Results are only comparable across runs of the *same* corpus. Editing a
+    target source — even only its comments — can change how hard the fixture is,
+    so a baseline that does not pin the corpus can be silently compared against
+    numbers it has no relationship to. Covers the target sources and the label
+    set; reference PoCs are excluded since they never reach the agent.
+    """
+    digest = hashlib.sha256()
+    for fixture in sorted(fixtures, key=lambda f: f.name):
+        digest.update(fixture.name.encode())
+        for sol in sorted(fixture.src_dir.glob("*.sol")):
+            digest.update(sol.name.encode())
+            digest.update(sol.read_bytes())
+        for bug in fixture.known_bugs:
+            digest.update(f"{bug.id}:{bug.vuln_class}".encode())
+    return digest.hexdigest()[:12]
 
 
 DEPS_DIR = TEMPLATE_DIR / "dependencies"

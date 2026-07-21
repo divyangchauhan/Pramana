@@ -95,6 +95,12 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
         for r in runs
     ]
     configs = sorted({row["config"] for r in runs for row in r["fixtures"]})
+    fingerprints = {r.get("corpus_fingerprint") for r in runs if r.get("corpus_fingerprint")}
+    if len(fingerprints) > 1:
+        raise SystemExit(
+            f"runs span different corpora ({sorted(fingerprints)}); they cannot be "
+            "aggregated into one baseline"
+        )
 
     return {
         "label": label,
@@ -104,6 +110,7 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
         "commit_url": f"{url}/commit/{_git('rev-parse', 'HEAD')}" if (url := _repo_url()) else "",
         "working_tree_dirty": _tracked_files_dirty(),
         "configs": configs,
+        "corpus_fingerprint": next(iter(fingerprints), None),
         "n_runs": len(runs),
         "total_known_bugs": runs[0]["total_known_bugs"],
         "true_positives_per_run": totals,
@@ -281,10 +288,19 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
             }
         )
 
+    # A gate across two different corpora is meaningless — the numbers describe
+    # different problems. Report it rather than quietly producing a verdict.
+    base_corpus = baseline.get("corpus_fingerprint")
+    cand_corpus = candidate.get("corpus_fingerprint")
+    corpus_mismatch = bool(base_corpus and cand_corpus and base_corpus != cand_corpus)
+
     tp_regression = tp_min < tp_floor
     fp_regression = fp_max > fp_ceiling
     unmatched_regression = unmatched_max > unmatched_ceiling
     return {
+        "baseline_corpus": base_corpus,
+        "candidate_corpus": cand_corpus,
+        "corpus_mismatch": corpus_mismatch,
         "unmatched_ceiling": unmatched_ceiling,
         "candidate_unmatched_max": unmatched_max,
         "unmatched_regression": unmatched_regression,
@@ -298,12 +314,28 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
         "false_positive_ceiling": fp_ceiling,
         "candidate_false_positive_max": fp_max,
         "false_positive_regression": fp_regression,
-        "passed": not (tp_regression or fp_regression or unmatched_regression),
+        "passed": not (
+            tp_regression or fp_regression or unmatched_regression or corpus_mismatch
+        ),
         "fixtures": fixtures,
     }
 
 
 def render_comparison(c: dict[str, Any]) -> str:
+    if c.get("corpus_mismatch"):
+        return "\n".join(
+            [
+                f"## Comparison against {c['baseline_label']} (`{c['baseline_commit']}`)",
+                "",
+                "⚠️ **Not comparable — the corpus changed.**",
+                "",
+                f"Baseline was scored against corpus `{c['baseline_corpus']}`; this run "
+                f"used `{c['candidate_corpus']}`. The fixtures themselves differ, so a "
+                "regression verdict would compare numbers describing different problems. "
+                "Re-record the baseline on the current corpus before gating against it.",
+            ]
+        ) + "\n"
+
     verdict = "✅ **No regression**" if c["passed"] else "❌ **Regression**"
     lines = [
         f"## Comparison against {c['baseline_label']} (`{c['baseline_commit']}`)",
