@@ -99,7 +99,7 @@ Three ideas do the heavy lifting — each is a deliberate engineering choice, no
 
 ## The corpus
 
-Four self-contained fixtures, each modeled on a landmark real-world exploit, with a labeled known-bug set and a reference PoC:
+Five self-contained fixtures, each modeled on a landmark real-world exploit, with a labeled known-bug set and a reference PoC:
 
 | Fixture | Class | Modeled on |
 |---|---|---|
@@ -109,7 +109,11 @@ Four self-contained fixtures, each modeled on a landmark real-world exploit, wit
 | `unchecked-overflow-token` | integer-overflow | BeautyChain (BEC) `batchOverflow` (2018) |
 | `bank-multi` | reentrancy **+** access-control | composite two-bug contract — exercises 1:1 matching |
 
-Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline. Scaling to public benchmarks (Code4rena / Sherlock / DeFiHackLabs / EVMbench) and paired vulnerable/patched negative controls is on the roadmap.
+Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline.
+
+**Negative control.** Recall alone can be gamed by a model that reports everything, so the corpus also ships `reentrancy-vault-patched` — an otherwise identical twin of `reentrancy-vault` whose `withdraw()` applies the effect before the interaction. It declares **zero** known bugs, so every confirmed finding against it is unambiguously a false positive. Its `reference/` holds control tests rather than an exploit, asserting both that the drain now reverts *and* that honest withdrawals still succeed — a degenerate always-revert "fix" would otherwise pass as safe. CI additionally replays the real exploit against the patched twin and requires it to fail, so the control cannot silently rot.
+
+Scaling to public benchmarks (Code4rena / Sherlock / DeFiHackLabs / EVMbench) and a full paired-patch set is on the roadmap.
 
 ---
 
@@ -135,12 +139,16 @@ fixture                    cfg                    cand conf  poc+  TP  recall
 -----------------------------------------------------------------------------
 bank-multi                 reference-poc             2    2     2   2    1.00
 reentrancy-vault           reference-poc             1    1     1   1    1.00
+reentrancy-vault-patched   reference-poc             0    0     0   0       -
 tx-origin-wallet           reference-poc             1    1     1   1    1.00
 unchecked-overflow-token   reference-poc             1    1     1   1    1.00
 unprotected-owner          reference-poc             1    1     1   1    1.00
 -----------------------------------------------------------------------------
 HEADLINE — true-positive findings confirmed with executable PoCs: 6 / 6 known bugs
+NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
 ```
+
+A `recall` of `-` marks a negative control: it has no known bugs, so recall is undefined and the number that matters is its false-positive count.
 
 **Live agent run** — drop your key in `.env` (the app auto-loads it and refuses to start if the selected provider's credential is missing):
 
@@ -196,11 +204,11 @@ pramana/
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
 └── eval/
-    ├── datasets/       # the real-world corpus (5 fixtures, 6 known bugs)
+    ├── datasets/       # the real-world corpus (5 vulnerable fixtures / 6 known bugs + 1 negative control)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     └── harness.py      # runs audit() over fixtures, counts true positives
-tests/                  # 37 offline tests (parsing, matching, grading, retries, wire translation, env)
+tests/                  # 42 offline tests (parsing, matching, grading, retries, wire translation, env, negative control)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -210,7 +218,7 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 37 offline tests, no network/keys
+uv run pytest                      # 42 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```

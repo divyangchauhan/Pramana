@@ -1,0 +1,6 @@
+{
+  "name": "reentrancy-vault-patched",
+  "contract": "src/EtherStore.sol",
+  "inspiration": "Negative control — paired patched twin of reentrancy-vault",
+  "known_bugs": []
+}

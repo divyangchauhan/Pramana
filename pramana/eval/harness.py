@@ -282,10 +282,20 @@ def run_agent_eval(
 def summarize(rows: list[FixtureRow]) -> dict:
     total_tp = sum(r.true_positive_findings for r in rows)
     total_known = sum(r.n_known_bugs for r in rows)
+    controls = [r for r in rows if r.n_known_bugs == 0]
     return {
         "true_positive_findings": total_tp,  # headline number
         "total_known_bugs": total_known,
-        "fixtures": [r.__dict__ for r in rows],
+        # Negative controls hold no known bugs, so every confirmed finding on
+        # one is unambiguously a false positive.
+        "negative_control_fixtures": [r.fixture for r in controls],
+        "negative_control_false_positives": sum(r.n_confirmed for r in controls),
+        "negative_control_proven_false_positives": sum(r.confirmed_poc_pass for r in controls),
+        # `report_markdown` is deliberately excluded: reports are written as
+        # standalone files by --report-dir, and inlining them bloats the JSON.
+        "fixtures": [
+            {k: v for k, v in r.__dict__.items() if k != "report_markdown"} for r in rows
+        ],
     }
 
 
@@ -310,7 +320,17 @@ def print_report(rows: list[FixtureRow]) -> None:
             print(f"    ! error: {r.error}")
     print("-" * len(header))
     print(f"\nHEADLINE — true-positive findings confirmed with executable PoCs: "
-          f"{total_tp} / {total_known} known bugs\n")
+          f"{total_tp} / {total_known} known bugs")
+
+    # Negative controls (recall "-") carry no known bugs: any confirmed finding
+    # on one is a false positive, and a *passing* PoC on one is a proven FP.
+    controls = [r for r in rows if r.n_known_bugs == 0]
+    if controls:
+        fp = sum(r.n_confirmed for r in controls)
+        proven = sum(r.confirmed_poc_pass for r in controls)
+        print(f"NEGATIVE CONTROLS ({len(controls)}) — false positives: {fp} "
+              f"confirmed, {proven} with a passing PoC")
+    print()
 
 
 def write_reports(rows: list[FixtureRow], report_dir: Path) -> int:
