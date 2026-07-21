@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import Any
 
 from .agents.finder import FINDER_SYS, FINDER_TOOLS
@@ -163,6 +164,17 @@ def _role_trace(trace: TraceFn | None, role: str, finding_id: str | None = None)
     return _tagged
 
 
+def _normalize_ws_path(path: str) -> str:
+    """Workspace-relative path in a comparable form.
+
+    Models report the same file as ``test/F-001.t.sol``, ``./test/F-001.t.sol``
+    or with backslashes. Comparing raw strings would quarantine a *confirmed*
+    PoC because its reported path merely looked different, and the grader would
+    then score a real true positive as a miss.
+    """
+    return PurePosixPath(path.replace("\\", "/")).as_posix().removeprefix("./")
+
+
 def _quarantine_unconfirmed(ctx: ToolContext, keep: set[str]) -> None:
     """Move every test/*.t.sol that is not a confirmed PoC out of the compile path.
 
@@ -173,9 +185,10 @@ def _quarantine_unconfirmed(ctx: ToolContext, keep: set[str]) -> None:
     test_dir = ctx.workspace / "test"
     if not test_dir.is_dir():
         return
+    keep_normalized = {_normalize_ws_path(p) for p in keep}
     quarantine = ctx.workspace / ATTEMPTS_DIR
     for path in sorted(test_dir.glob("*.t.sol")):
-        if str(path.relative_to(ctx.workspace)) in keep:
+        if _normalize_ws_path(str(path.relative_to(ctx.workspace))) in keep_normalized:
             continue
         quarantine.mkdir(parents=True, exist_ok=True)
         path.replace(quarantine / path.name)

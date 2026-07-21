@@ -225,6 +225,21 @@ def test_unconfirmed_pocs_are_moved_out_of_the_compile_path(tmp_path):
     assert (ws / "attempts" / "F-002.t.sol").read_text() == "this does not compile"
 
 
+@pytest.mark.parametrize(
+    "reported", ["test/F-001.t.sol", "./test/F-001.t.sol", "test\\F-001.t.sol"]
+)
+def test_a_confirmed_poc_is_kept_however_its_path_was_spelled(tmp_path, reported):
+    """Quarantining a confirmed PoC because its reported path merely looked
+    different would make the grader score a real true positive as a miss."""
+    ws = tmp_path / "ws"
+    (ws / "test").mkdir(parents=True)
+    (ws / "test" / "F-001.t.sol").write_text("// confirmed")
+
+    _quarantine_unconfirmed(ToolContext(workspace=ws), keep={reported})
+
+    assert (ws / "test" / "F-001.t.sol").exists()
+
+
 # --- report synthesis --------------------------------------------------------
 
 
