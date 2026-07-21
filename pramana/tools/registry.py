@@ -8,7 +8,7 @@ a tool crash or time out kill the agent loop — errors are returned to the mode
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from ..providers.base import ToolCall, ToolResult
 from .files import ToolContext, read_file, write_file
@@ -16,14 +16,29 @@ from .foundry import run_foundry_test
 from .slither import run_slither
 
 
-def build_tool_registry(ctx: ToolContext) -> dict[str, Callable[..., str]]:
-    """Return {tool_name -> callable(**arguments) -> str} bound to ``ctx``."""
-    return {
+def build_tool_registry(
+    ctx: ToolContext, names: Iterable[str] | None = None
+) -> dict[str, Callable[..., str]]:
+    """Return {tool_name -> callable(**arguments) -> str} bound to ``ctx``.
+
+    ``names`` restricts the registry to a subset — tool scope *is* role
+    definition (design §2). Scoping the registry, and not just the schema list
+    the model sees, means an agent that hallucinates a tool it was not granted
+    gets an error result rather than the capability: the finder cannot write or
+    execute a PoC even if it tries.
+    """
+    all_tools: dict[str, Callable[..., str]] = {
         "read_file": lambda **a: read_file(ctx, **a),
         "run_slither": lambda **a: run_slither(ctx, **a),
         "write_file": lambda **a: write_file(ctx, **a),
         "run_foundry_test": lambda **a: run_foundry_test(ctx, **a),
     }
+    if names is None:
+        return all_tools
+    unknown = set(names) - set(all_tools)
+    if unknown:
+        raise KeyError(f"unknown tool(s): {sorted(unknown)}")
+    return {name: all_tools[name] for name in names}
 
 
 def dispatch(call: ToolCall, registry: dict[str, Callable[..., str]], max_chars: int) -> ToolResult:

@@ -9,7 +9,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pramana.eval.baseline import aggregate, render_markdown
+from pramana.eval.baseline import (
+    _unmatched_per_run,
+    aggregate,
+    compare,
+    render_comparison,
+    render_markdown,
+)
 
 
 def _run(tmp: Path, name: str, rows: list[dict], control_fp: int = 0) -> Path:
@@ -90,6 +96,114 @@ def test_fixture_errors_are_carried_into_the_record(tmp_path):
     row["error"] = "ProviderError: overloaded"
     b = aggregate([_run(tmp_path, "r1.json", [row])], "Phase 0")
     assert b["fixtures"][0]["errors"] == ["ProviderError: overloaded"]
+
+
+def test_comparison_passes_when_the_candidate_holds_the_gate(tmp_path):
+    old = aggregate([_run(tmp_path, "o1.json", [_row("a", 1, 1)])], "Phase 0")
+    new = aggregate([_run(tmp_path, "n1.json", [_row("a", 1, 1)])], "Phase 1")
+
+    c = compare(new, old)
+    assert c["passed"] is True
+    assert c["true_positive_regression"] is False
+    assert "No regression" in render_comparison(c)
+
+
+def test_comparison_flags_a_true_positive_regression(tmp_path):
+    old = aggregate([_run(tmp_path, "o1.json", [_row("a", 1, 1), _row("b", 1, 1)])], "Phase 0")
+    new = aggregate([_run(tmp_path, "n1.json", [_row("a", 1, 1), _row("b", 0, 1)])], "Phase 1")
+
+    c = compare(new, old)
+    assert c["passed"] is False
+    assert c["true_positive_regression"] is True
+    assert c["true_positive_floor"] == 2
+    assert c["candidate_true_positive_floor"] == 1
+    assert "Regression" in render_comparison(c)
+
+
+def test_comparison_flags_new_negative_control_false_positives(tmp_path):
+    """Recall can hold steady while precision collapses; the gate must catch it."""
+    old = aggregate(
+        [_run(tmp_path, "o1.json", [_row("a", 1, 1), _row("ctl", 0, 0, confirmed=0)], 0)],
+        "Phase 0",
+    )
+    new = aggregate(
+        [_run(tmp_path, "n1.json", [_row("a", 1, 1), _row("ctl", 0, 0, confirmed=2)], 2)],
+        "Phase 1",
+    )
+
+    c = compare(new, old)
+    assert c["true_positive_regression"] is False, "recall is unchanged"
+    assert c["false_positive_regression"] is True
+    assert c["passed"] is False
+
+
+def test_comparison_gates_on_the_floor_not_the_mean(tmp_path):
+    """A lucky run must not mask a bad one. Baseline scores 2 every run;
+    the candidate scores 4 then 1 — a better mean but a worse worst case, and
+    an unstable pipeline is a regression however good its best day was."""
+    steady = [_row("a", 1, 1), _row("b", 1, 1), _row("c", 0, 1), _row("d", 0, 1)]
+    old = aggregate(
+        [_run(tmp_path, "o1.json", steady), _run(tmp_path, "o2.json", steady)],
+        "Phase 0",
+    )
+    new = aggregate(
+        [
+            _run(tmp_path, "n1.json", [_row(n, 1, 1) for n in "abcd"]),
+            _run(tmp_path, "n2.json", [_row("a", 1, 1)] + [_row(n, 0, 1) for n in "bcd"]),
+        ],
+        "Phase 1",
+    )
+
+    assert new["true_positives_mean"] > old["true_positives_mean"], "candidate has a better mean"
+    assert new["true_positives_min"] < old["true_positives_min"], "but a worse floor"
+    assert compare(new, old)["passed"] is False
+
+
+def test_unmatched_is_derived_for_baselines_recorded_before_the_metric_existed(tmp_path):
+    """Re-aggregating an old baseline to add the field would re-stamp it with a
+    newer commit and destroy its provenance, so it is derived instead."""
+    old = aggregate(
+        [_run(tmp_path, "o1.json", [_row("a", 1, 1, confirmed=2), _row("ctl", 0, 0, confirmed=1)])],
+        "Phase 0",
+    )
+    del old["unmatched_confirmed_per_run"]
+
+    # 2 confirmed but only 1 true positive on the labeled fixture -> 1 unmatched.
+    # The control's confirmed finding is a negative-control FP, counted elsewhere.
+    assert _unmatched_per_run(old) == [1]
+
+    new = aggregate([_run(tmp_path, "n1.json", [_row("a", 1, 1, confirmed=1)])], "Phase 1")
+    c = compare(new, old)
+    assert c["unmatched_ceiling"] == 1
+    assert c["candidate_unmatched_max"] == 0
+    assert c["unmatched_regression"] is False
+
+
+def test_unmatched_regression_is_caught_while_recall_holds(tmp_path):
+    """The tx-origin duplicate case: 6/6 recall, zero control FPs, but the same
+    bug reported twice. Only the unmatched metric can see it."""
+    old = aggregate([_run(tmp_path, "o1.json", [_row("a", 1, 1, confirmed=1)])], "Phase 0")
+    new = aggregate([_run(tmp_path, "n1.json", [_row("a", 1, 1, confirmed=2)])], "Phase 1")
+
+    c = compare(new, old)
+    assert c["true_positive_regression"] is False, "recall is unchanged"
+    assert c["false_positive_regression"] is False, "no control false positives"
+    assert c["unmatched_regression"] is True
+    assert c["passed"] is False
+
+
+def test_reproduce_command_round_trips_the_pipeline_from_the_label(tmp_path):
+    rows = [_row("a", 1, 1)]
+    rows[0]["config"] = "phase1/anthropic:claude-opus-4-8"
+    md = render_markdown(aggregate([_run(tmp_path, "r1.json", rows)], "Phase 1"))
+    assert "--provider anthropic --pipeline phase1" in md
+
+
+def test_split_role_label_still_yields_a_usable_provider(tmp_path):
+    rows = [_row("a", 1, 1)]
+    rows[0]["config"] = "phase1/finder=anthropic:a,verifier=openai:b"
+    md = render_markdown(aggregate([_run(tmp_path, "r1.json", rows)], "Phase 1"))
+    assert "--provider anthropic --pipeline phase1" in md
 
 
 def test_markdown_records_provenance(tmp_path):

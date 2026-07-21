@@ -1,0 +1,291 @@
+{
+  "label": "Phase 1",
+  "captured_utc": "2026-07-21T10:54:50Z",
+  "commit": "ccdd8bfd43b998ce0ed390554571d9c941579262",
+  "commit_short": "ccdd8bf",
+  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/ccdd8bfd43b998ce0ed390554571d9c941579262",
+  "working_tree_dirty": false,
+  "configs": [
+    "phase1/anthropic:claude-opus-4-8"
+  ],
+  "n_runs": 3,
+  "total_known_bugs": 6,
+  "true_positives_per_run": [
+    6,
+    6,
+    6
+  ],
+  "true_positives_min": 6,
+  "true_positives_max": 6,
+  "true_positives_mean": 6.0,
+  "negative_control_false_positives_per_run": [
+    0,
+    0,
+    0
+  ],
+  "negative_control_proven_false_positives_per_run": [
+    0,
+    0,
+    0
+  ],
+  "unmatched_confirmed_per_run": [
+    0,
+    0,
+    0
+  ],
+  "fully_deterministic": true,
+  "fixtures": [
+    {
+      "fixture": "bank-multi",
+      "n_known_bugs": 2,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        2,
+        2,
+        2
+      ],
+      "confirmed_per_run": [
+        2,
+        2,
+        2
+      ],
+      "candidates_per_run": [
+        2,
+        2,
+        2
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "reentrancy-vault",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "reentrancy-vault-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "tx-origin-wallet",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unchecked-overflow-token",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unprotected-owner",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    }
+  ],
+  "comparison": {
+    "unmatched_ceiling": 0,
+    "candidate_unmatched_max": 0,
+    "unmatched_regression": false,
+    "baseline_label": "Phase 0",
+    "baseline_commit": "10fbec0",
+    "candidate_label": "Phase 1",
+    "candidate_commit": "ccdd8bf",
+    "true_positive_floor": 6,
+    "candidate_true_positive_floor": 6,
+    "true_positive_regression": false,
+    "false_positive_ceiling": 0,
+    "candidate_false_positive_max": 0,
+    "false_positive_regression": false,
+    "passed": true,
+    "fixtures": [
+      {
+        "fixture": "bank-multi",
+        "is_negative_control": false,
+        "baseline_tp_floor": 2,
+        "candidate_tp_floor": 2,
+        "delta": 0,
+        "baseline_confirmed": [
+          2,
+          2,
+          2
+        ],
+        "candidate_confirmed": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "fixture": "reentrancy-vault",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "fixture": "reentrancy-vault-patched",
+        "is_negative_control": true,
+        "baseline_tp_floor": 0,
+        "candidate_tp_floor": 0,
+        "delta": 0,
+        "baseline_confirmed": [
+          0,
+          0,
+          0
+        ],
+        "candidate_confirmed": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "fixture": "tx-origin-wallet",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "fixture": "unchecked-overflow-token",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "fixture": "unprotected-owner",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      }
+    ]
+  }
+}

@@ -84,6 +84,9 @@ class FixtureRow:
     finder_precision: float | None
     verifier_precision: float | None
     recall: float | None
+    # Claims the verifier actively killed. Always 0 for phase0, whose single
+    # agent has no refutation step — this is the count Phase 1 exists to move.
+    n_refuted: int = 0
     error: str | None = None
     report_markdown: str = ""
     details: list[dict] = field(default_factory=list)
@@ -225,11 +228,22 @@ def run_agent_eval(
     *,
     forge_retries: int = 2,
     verbose: bool = False,
+    pipeline: str = "phase0",
 ) -> list[FixtureRow]:
-    from ..pipeline import audit  # local import: needs a provider SDK
+    from ..pipeline import audit_phase0, audit_phase1  # local import: needs a provider SDK
 
-    adapter = build_adapter(config.agent.provider)
-    adapter.check_capabilities(config.agent.model)
+    label = config.label(pipeline)
+
+    # One adapter per distinct provider in the routing table, checked up front
+    # so a bad model id fails before any fixture is run.
+    profiles = (
+        [config.agent] if pipeline == "phase0" else [config.role("finder"), config.role("verifier")]
+    )
+    adapters = {}
+    for profile in profiles:
+        adapter = adapters.get(profile.provider) or build_adapter(profile.provider)
+        adapter.check_capabilities(profile.model)
+        adapters[profile.provider] = adapter
 
     rows: list[FixtureRow] = []
     for fx in fixtures:
@@ -244,12 +258,17 @@ def run_agent_eval(
                 print(f"  [{_name}] {e}", file=sys.stderr)
             trace = _trace
         try:
-            result = audit(adapter, config, ctx, fx.contract, trace=trace)
+            if pipeline == "phase0":
+                result = audit_phase0(
+                    adapters[config.agent.provider], config, ctx, fx.contract, trace=trace
+                )
+            else:
+                result = audit_phase1(adapters, config, ctx, fx.contract, trace=trace)
         except Exception as exc:  # keep the sweep going; record the failure
             rows.append(
                 FixtureRow(
                     fixture=fx.name,
-                    config=config.agent.label(),
+                    config=label,
                     n_candidates=0,
                     n_confirmed=0,
                     confirmed_poc_pass=0,
@@ -267,11 +286,12 @@ def run_agent_eval(
             fx,
             probes,
             work_root / fx.name / "grade",
-            config.agent.label(),
+            label,
             forge_timeout=forge_timeout,
             forge_retries=forge_retries,
         )
         row.report_markdown = result.output.report_markdown
+        row.n_refuted = result.n_refuted
         rows.append(row)
     return rows
 
@@ -291,6 +311,13 @@ def summarize(rows: list[FixtureRow]) -> dict:
         "negative_control_fixtures": [r.fixture for r in controls],
         "negative_control_false_positives": sum(r.n_confirmed for r in controls),
         "negative_control_proven_false_positives": sum(r.confirmed_poc_pass for r in controls),
+        # Confirmed findings on a *labeled* fixture that matched no known bug:
+        # duplicates of an already-claimed bug, or claims about something that
+        # isn't a labeled vulnerability. Recall cannot see these — a pipeline
+        # can hold 6/6 while flooding the report with restated findings.
+        "unmatched_confirmed_findings": sum(
+            r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs
+        ),
         # `report_markdown` is deliberately excluded: reports are written as
         # standalone files by --report-dir, and inlining them bloats the JSON.
         "fixtures": [
@@ -302,9 +329,10 @@ def summarize(rows: list[FixtureRow]) -> dict:
 def print_report(rows: list[FixtureRow]) -> None:
     total_tp = sum(r.true_positive_findings for r in rows)
     total_known = sum(r.n_known_bugs for r in rows)
-    print("\n=== Pramana Phase 0 eval ===")
+    print("\n=== Pramana eval ===")
+    width = max([22, *(len(r.config) for r in rows)])
     header = (
-        f"{'fixture':<26} {'cfg':<22} {'cand':>4} {'conf':>4} "
+        f"{'fixture':<26} {'cfg':<{width}} {'cand':>4} {'ref':>4} {'conf':>4} "
         f"{'poc+':>5} {'TP':>3} {'recall':>7}"
     )
     print(header)
@@ -312,8 +340,9 @@ def print_report(rows: list[FixtureRow]) -> None:
     for r in rows:
         recall = "-" if r.recall is None else f"{r.recall:.2f}"
         line = (
-            f"{r.fixture:<26} {r.config:<22} {r.n_candidates:>4} {r.n_confirmed:>4} "
-            f"{r.confirmed_poc_pass:>5} {r.true_positive_findings:>3} {recall:>7}"
+            f"{r.fixture:<26} {r.config:<{width}} {r.n_candidates:>4} {r.n_refuted:>4} "
+            f"{r.n_confirmed:>4} {r.confirmed_poc_pass:>5} "
+            f"{r.true_positive_findings:>3} {recall:>7}"
         )
         print(line)
         if r.error:
@@ -324,6 +353,11 @@ def print_report(rows: list[FixtureRow]) -> None:
 
     # Negative controls (recall "-") carry no known bugs: any confirmed finding
     # on one is a false positive, and a *passing* PoC on one is a proven FP.
+    unmatched = sum(r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs)
+    if unmatched:
+        print(f"UNMATCHED — {unmatched} confirmed finding(s) on labeled fixtures matched no "
+              "known bug (duplicate or spurious); recall cannot see these")
+
     controls = [r for r in rows if r.n_known_bugs == 0]
     if controls:
         fp = sum(r.n_confirmed for r in controls)
@@ -359,6 +393,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", choices=["anthropic", "openai", "kimi"],
                         help="LLM provider for a real agent run")
     parser.add_argument("--model", help="override the model id for the provider")
+    parser.add_argument("--pipeline", choices=["phase0", "phase1"], default="phase1",
+                        help="phase0: one combined agent; phase1: finder -> isolated "
+                             "verifier (default)")
+    parser.add_argument("--finder-model", help="route the finder to a different model (phase1)")
+    parser.add_argument("--verifier-model", help="route the verifier to a different model (phase1)")
+    parser.add_argument("--max-poc-attempts", type=int, default=4,
+                        help="executed forge runs allowed per verification (phase1, default 4)")
     parser.add_argument("--fixtures", nargs="*", help="restrict to these fixture names")
     parser.add_argument("--datasets", type=Path, default=DATASETS_DIR)
     parser.add_argument("--work-dir", type=Path, help="where to build workspaces (default: temp)")
@@ -406,7 +447,13 @@ def main(argv: list[str] | None = None) -> int:
         rows = run_self_check(fixtures, work_root, args.forge_timeout, args.forge_retries)
     else:
         config = AgentConfig.for_provider(
-            args.provider, args.model, max_turns=args.max_turns, max_tokens=args.max_tokens
+            args.provider,
+            args.model,
+            finder_model=args.finder_model,
+            verifier_model=args.verifier_model,
+            max_turns=args.max_turns,
+            max_tokens=args.max_tokens,
+            max_poc_attempts=args.max_poc_attempts,
         )
         try:
             rows = run_agent_eval(
@@ -416,9 +463,11 @@ def main(argv: list[str] | None = None) -> int:
                 args.forge_timeout,
                 forge_retries=args.forge_retries,
                 verbose=args.verbose,
+                pipeline=args.pipeline,
             )
         except Exception as exc:  # provider setup / auth / capability failure
-            print(f"error: could not start {config.agent.label()} run: {exc}", file=sys.stderr)
+            print(f"error: could not start {config.label(args.pipeline)} run: {exc}",
+                  file=sys.stderr)
             print(
                 "hint: set the provider API key (ANTHROPIC_API_KEY / OPENAI_API_KEY / "
                 "MOONSHOT_API_KEY) and pass a valid --model.",
