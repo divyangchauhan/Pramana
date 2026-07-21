@@ -93,11 +93,24 @@ def test_negative_control_false_positives_are_tracked_per_run(tmp_path):
     assert "must not exceed **1**" in render_markdown(b)
 
 
-def test_fixture_errors_are_carried_into_the_record(tmp_path):
+def test_aggregate_refuses_runs_with_errored_fixtures(tmp_path):
+    """Exhausted API credits mid-sweep score every remaining fixture 0. Folding
+    that in would record an infrastructure failure as a capability measurement
+    and drag the regression floor to zero."""
+    good = _run(tmp_path, "r1.json", [_row("a", 1, 1)])
+    bad_row = _row("a", 0, 1)
+    bad_row["error"] = "ProviderError: credit balance is too low"
+    bad = _run(tmp_path, "r2.json", [bad_row])
+
+    with pytest.raises(SystemExit, match="errored fixtures"):
+        aggregate([good, bad], "Phase 1")
+
+
+def test_aggregate_names_the_run_and_fixtures_that_failed(tmp_path):
     row = _row("a", 0, 1)
     row["error"] = "ProviderError: overloaded"
-    b = aggregate([_run(tmp_path, "r1.json", [row])], "Phase 0")
-    assert b["fixtures"][0]["errors"] == ["ProviderError: overloaded"]
+    with pytest.raises(SystemExit, match=r"r1\.json: a"):
+        aggregate([_run(tmp_path, "r1.json", [row])], "Phase 0")
 
 
 def test_comparison_passes_when_the_candidate_holds_the_gate(tmp_path):

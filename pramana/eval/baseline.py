@@ -95,6 +95,22 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
         for r in runs
     ]
     configs = sorted({row["config"] for r in runs for row in r["fixtures"]})
+    # A run whose fixtures errored (auth failure, exhausted credits, a provider
+    # outage) scores 0 for those fixtures. Folding it in would drag the floor to
+    # zero and record an infrastructure failure as a capability measurement.
+    broken = [
+        (path.name, [row["fixture"] for row in run["fixtures"] if row.get("error")])
+        for path, run in zip(run_paths, runs, strict=True)
+        if any(row.get("error") for row in run["fixtures"])
+    ]
+    if broken:
+        detail = "; ".join(f"{name}: {', '.join(fixtures)}" for name, fixtures in broken)
+        raise SystemExit(
+            f"refusing to build a baseline from runs with errored fixtures ({detail}). "
+            "Re-run those fixtures — a baseline must describe what the pipeline does, "
+            "not what the infrastructure did."
+        )
+
     fingerprints = {r.get("corpus_fingerprint") for r in runs if r.get("corpus_fingerprint")}
     if len(fingerprints) > 1:
         raise SystemExit(
