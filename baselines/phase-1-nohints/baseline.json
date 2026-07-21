@@ -1,0 +1,128 @@
+{
+  "label": "Phase 1 (hint-free corpus)",
+  "captured_utc": "2026-07-21T16:17:02Z",
+  "commit": "fe076ed3c624823be7ec58539e0082d6ddb667ad",
+  "commit_short": "fe076ed",
+  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/fe076ed3c624823be7ec58539e0082d6ddb667ad",
+  "working_tree_dirty": false,
+  "configs": [
+    "phase1/anthropic:claude-opus-4-8"
+  ],
+  "corpus_fingerprint": "bee662ded628",
+  "n_runs": 1,
+  "total_known_bugs": 6,
+  "true_positives_per_run": [
+    6
+  ],
+  "true_positives_min": 6,
+  "true_positives_max": 6,
+  "true_positives_mean": 6.0,
+  "negative_control_false_positives_per_run": [
+    0
+  ],
+  "negative_control_proven_false_positives_per_run": [
+    0
+  ],
+  "unmatched_confirmed_per_run": [
+    0
+  ],
+  "fully_deterministic": true,
+  "fixtures": [
+    {
+      "fixture": "bank-multi",
+      "n_known_bugs": 2,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        2
+      ],
+      "confirmed_per_run": [
+        2
+      ],
+      "candidates_per_run": [
+        2
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "reentrancy-vault",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1
+      ],
+      "confirmed_per_run": [
+        1
+      ],
+      "candidates_per_run": [
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "reentrancy-vault-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0
+      ],
+      "confirmed_per_run": [
+        0
+      ],
+      "candidates_per_run": [
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "tx-origin-wallet",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1
+      ],
+      "confirmed_per_run": [
+        1
+      ],
+      "candidates_per_run": [
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unchecked-overflow-token",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1
+      ],
+      "confirmed_per_run": [
+        1
+      ],
+      "candidates_per_run": [
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unprotected-owner",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1
+      ],
+      "confirmed_per_run": [
+        1
+      ],
+      "candidates_per_run": [
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    }
+  ]
+}
