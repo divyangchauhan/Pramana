@@ -65,6 +65,11 @@ def _first_fixture():
     return fixtures[0]
 
 
+def _ref_path(fx) -> Path:
+    assert fx.reference_poc is not None
+    return fx.dir / fx.reference_poc
+
+
 def test_confirmed_reference_poc_counts_as_tp():
     fx = _first_fixture()
     with tempfile.TemporaryDirectory() as tmp:
@@ -75,7 +80,7 @@ def test_confirmed_reference_poc_counts_as_tp():
 
 def test_inconclusive_never_counts():
     fx = _first_fixture()
-    ref = fx.dir / fx.reference_poc
+    ref = _ref_path(fx)
     probes = [Probe(id="P1", vuln_class="reentrancy", verdict="inconclusive", poc_file=ref)]
     with tempfile.TemporaryDirectory() as tmp:
         row = grade(fx, probes, Path(tmp), "test")
@@ -96,7 +101,7 @@ def test_confirmed_without_working_poc_is_not_tp():
 
 def test_wrong_class_does_not_match_known_bug():
     fx = _first_fixture()  # known bug is reentrancy
-    ref = fx.dir / fx.reference_poc
+    ref = _ref_path(fx)
     # PoC passes, but the claimed class doesn't match the known bug.
     probes = [Probe(id="P1", vuln_class="tx-origin", verdict="confirmed", poc_file=ref)]
     with tempfile.TemporaryDirectory() as tmp:

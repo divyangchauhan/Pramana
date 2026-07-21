@@ -23,6 +23,7 @@ class ToolContext:
     workspace: Path
     slither_timeout: int = 180
     forge_timeout: int = 300
+    forge_retries: int = 2
     max_output_chars: int = 20_000
 
     def resolve(self, path: str) -> Path:

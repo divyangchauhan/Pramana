@@ -6,10 +6,12 @@
 
 No proof-of-concept, no finding. Provider-neutral across Claude, GPT, and Kimi, and measured by an eval harness from day one.
 
+[![CI](https://github.com/divyangchauhan/Pramana/actions/workflows/ci.yml/badge.svg)](https://github.com/divyangchauhan/Pramana/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab)
 ![Foundry](https://img.shields.io/badge/tested_with-Foundry-2a2a2a)
 ![Providers](https://img.shields.io/badge/providers-Anthropic%20·%20OpenAI%20·%20Kimi-6f42c1)
 ![Verification](https://img.shields.io/badge/findings-verified_by_executable_PoC-2ea043)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 </div>
 
@@ -32,14 +34,15 @@ The headline metric is **true-positive findings confirmed with an executable PoC
 
 Full corpus, live run with `claude-opus-4-8`:
 
-| Fixture | Vulnerability class | Verdict | PoC re-verified | True positive |
+| Fixture | Vulnerability class(es) | Known bugs | Proven with PoC | True positives |
 |---|---|:---:|:---:|:---:|
-| `reentrancy-vault` | reentrancy | confirmed | ✅ | ✅ |
-| `unprotected-owner` | access-control | confirmed | ✅ | ✅ |
-| `tx-origin-wallet` | tx-origin | confirmed | ✅ | ✅ |
-| `unchecked-overflow-token` | integer-overflow | confirmed | ✅ | ✅ |
+| `reentrancy-vault` | reentrancy | 1 | ✅ | 1 |
+| `unprotected-owner` | access-control | 1 | ✅ | 1 |
+| `tx-origin-wallet` | tx-origin | 1 | ✅ | 1 |
+| `unchecked-overflow-token` | integer-overflow | 1 | ✅ | 1 |
+| `bank-multi` | reentrancy **+** access-control | 2 | ✅ ✅ | 2 |
 
-**4 / 4 true positives · recall 1.00 · precision 1.00.** Every finding came with a Foundry exploit that the harness re-ran, from scratch, against the untouched target contract.
+**6 / 6 true positives · recall 1.00 · precision 1.00.** Every finding came with a Foundry exploit that the harness re-ran, from scratch, against the untouched target contract — including the composite `bank-multi`, where both distinct bugs were found and proven independently.
 
 An offline `--self-check` reproduces the entire scoring pipeline (workspace build → `forge test` → class match → count) with **no API key required**.
 
@@ -104,6 +107,7 @@ Four self-contained fixtures, each modeled on a landmark real-world exploit, wit
 | `unprotected-owner` | access-control | Parity multisig unprotected initializer (2017) |
 | `tx-origin-wallet` | tx-origin (SWC-115) | `tx.origin` phishing |
 | `unchecked-overflow-token` | integer-overflow | BeautyChain (BEC) `batchOverflow` (2018) |
+| `bank-multi` | reentrancy **+** access-control | composite two-bug contract — exercises 1:1 matching |
 
 Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline. Scaling to public benchmarks (Code4rena / Sherlock / DeFiHackLabs / EVMbench) and paired vulnerable/patched negative controls is on the roadmap.
 
@@ -129,12 +133,13 @@ uv run python -m pramana.eval.harness --self-check
 ```
 fixture                    cfg                    cand conf  poc+  TP  recall
 -----------------------------------------------------------------------------
+bank-multi                 reference-poc             2    2     2   2    1.00
 reentrancy-vault           reference-poc             1    1     1   1    1.00
 tx-origin-wallet           reference-poc             1    1     1   1    1.00
 unchecked-overflow-token   reference-poc             1    1     1   1    1.00
 unprotected-owner          reference-poc             1    1     1   1    1.00
 -----------------------------------------------------------------------------
-HEADLINE — true-positive findings confirmed with executable PoCs: 4 / 4 known bugs
+HEADLINE — true-positive findings confirmed with executable PoCs: 6 / 6 known bugs
 ```
 
 **Live agent run** — drop your key in `.env` (the app auto-loads it and refuses to start if the selected provider's credential is missing):
@@ -155,8 +160,10 @@ uv run python -m pramana.eval.harness --provider kimi   --model <kimi-k3-id>
 # handy flags
 --fixtures reentrancy-vault tx-origin-wallet   # restrict the set
 --json results.json                            # full per-finding results
+--report-dir ./reports                         # write a per-fixture audit report.md
 --verbose                                      # stream tool calls to stderr
 --work-dir ./runs                              # keep workspaces (agent PoCs) to inspect
+--forge-retries 3                              # retries for transient forge/anvil flakiness
 ```
 
 </details>
@@ -189,11 +196,12 @@ pramana/
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
 └── eval/
-    ├── datasets/       # the real-world corpus (4 known-bug fixtures)
+    ├── datasets/       # the real-world corpus (5 fixtures, 6 known bugs)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     └── harness.py      # runs audit() over fixtures, counts true positives
-tests/                  # 31 offline tests (parsing, matching, grading, wire translation, env)
+tests/                  # 37 offline tests (parsing, matching, grading, retries, wire translation, env)
+.github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
 
@@ -202,11 +210,12 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest            # 31 offline tests, no network/keys
-uv run ruff check pramana tests
+uv run pytest                      # 37 offline tests, no network/keys
+uv run ruff check pramana tests    # lint
+uv run pyright pramana tests       # type check (clean)
 ```
 
-Tests cover boundary JSON parsing, vulnerability-class matching, the grading paths (including the negative cases — a non-passing PoC or wrong class never counts), the canonical↔provider wire translation for all three labs, and env validation.
+Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching), the grading paths (a non-passing PoC or wrong class never counts), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for all three labs, and env validation. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ---
 

@@ -1,0 +1,21 @@
+{
+  "name": "bank-multi",
+  "contract": "src/Bank.sol",
+  "inspiration": "Composite: The DAO reentrancy + Parity-style unprotected admin",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "reentrancy",
+      "location": "Bank.withdraw()",
+      "description": "External ETH transfer precedes the balance update, enabling a reentrant receiver to drain all deposits.",
+      "reference_poc": "reference/BankReentrancyExploit.t.sol"
+    },
+    {
+      "id": "KB-2",
+      "vuln_class": "access-control",
+      "location": "Bank.setAdmin()",
+      "description": "setAdmin() has no authorization, so any account can seize admin and sweep() the entire balance.",
+      "reference_poc": "reference/BankAdminTakeoverExploit.t.sol"
+    }
+  ]
+}
