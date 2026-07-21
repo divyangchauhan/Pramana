@@ -1,6 +1,6 @@
 # Phase 1 baseline
 
-Captured **2026-07-21T10:35:22Z** at commit [`1fdaaf1`](https://github.com/divyangchauhan/Pramana/commit/1fdaaf1aac92f448f368ab3636b8ac63f4240f75) over **3 independent runs** of `phase1/anthropic:claude-opus-4-8`.
+Captured **2026-07-21T10:51:35Z** at commit [`c1c939d`](https://github.com/divyangchauhan/Pramana/commit/c1c939d69a8f04c3a7219de1c189be7b8e175f30) over **3 independent runs** of `phase1/anthropic:claude-opus-4-8`.
 
 > ⚠️ Captured with uncommitted changes to tracked files — the recorded commit does not fully describe the code that produced these numbers.
 
@@ -11,7 +11,7 @@ This is the reference point for later phases. A refactor is a regression if it d
 | `bank-multi` | 2 | 2, 2, 2 | 2, 2, 2 | ✅ |
 | `reentrancy-vault` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 | `reentrancy-vault-patched` | 0 *(control)* | 0, 0, 0 | 0, 0, 0 | ✅ |
-| `tx-origin-wallet` | 1 | 1, 1, 1 | 2, 2, 2 | ✅ |
+| `tx-origin-wallet` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 | `unchecked-overflow-token` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 | `unprotected-owner` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 
@@ -35,11 +35,11 @@ uv run python -m pramana.eval.harness --provider anthropic --pipeline phase1 \
 
 ## Comparison against Phase 0 (`1fdaaf1`)
 
-❌ **Regression**
+✅ **No regression**
 
 - True positives: floor **6** vs baseline floor **6** — gate held
 - Negative-control false positives: worst **0** vs baseline ceiling **0** — gate held
-- Unmatched confirmed findings: worst **1** vs baseline ceiling **0** — REGRESSION
+- Unmatched confirmed findings: worst **0** vs baseline ceiling **0** — gate held
 
 | Fixture | Baseline TP (floor) | Candidate TP (floor) | Δ |
 |---|:---:|:---:|:---:|

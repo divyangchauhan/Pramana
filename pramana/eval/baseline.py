@@ -223,6 +223,30 @@ def _pipeline_and_provider(config_label: str) -> tuple[str, str]:
     return pipeline, first.split(":")[0]
 
 
+def _unmatched_per_run(b: dict[str, Any]) -> list[int]:
+    """Unmatched confirmed findings per run, derived if not recorded.
+
+    Baselines written before this metric existed still carry the per-fixture
+    confirmed and true-positive counts it is computed from, so an old record
+    can be compared against without re-running it — which would destroy its
+    provenance by re-stamping numbers with a newer commit.
+    """
+    recorded = b.get("unmatched_confirmed_per_run")
+    if recorded:
+        return recorded
+    n_runs = b.get("n_runs", 0)
+    derived = [0] * n_runs
+    for fixture in b.get("fixtures", []):
+        if not fixture.get("n_known_bugs"):
+            continue  # negative controls are counted separately
+        confirmed = fixture.get("confirmed_per_run", [])
+        tps = fixture.get("true_positives_per_run", [])
+        for i, (c, tp) in enumerate(zip(confirmed, tps, strict=False)):
+            if i < n_runs:
+                derived[i] += c - tp
+    return derived or [0]
+
+
 def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
     """Check a candidate baseline against an earlier one's regression gate.
 
@@ -235,8 +259,8 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
     fp_ceiling = max(baseline["negative_control_false_positives_per_run"] or [0])
     tp_min = candidate["true_positives_min"]
     fp_max = max(candidate["negative_control_false_positives_per_run"] or [0])
-    unmatched_ceiling = max(baseline.get("unmatched_confirmed_per_run") or [0])
-    unmatched_max = max(candidate.get("unmatched_confirmed_per_run") or [0])
+    unmatched_ceiling = max(_unmatched_per_run(baseline))
+    unmatched_max = max(_unmatched_per_run(candidate))
 
     base_by_fixture = {f["fixture"]: f for f in baseline["fixtures"]}
     fixtures = []

@@ -1,9 +1,9 @@
 {
   "label": "Phase 1",
-  "captured_utc": "2026-07-21T10:35:22Z",
-  "commit": "1fdaaf1aac92f448f368ab3636b8ac63f4240f75",
-  "commit_short": "1fdaaf1",
-  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/1fdaaf1aac92f448f368ab3636b8ac63f4240f75",
+  "captured_utc": "2026-07-21T10:51:35Z",
+  "commit": "c1c939d69a8f04c3a7219de1c189be7b8e175f30",
+  "commit_short": "c1c939d",
+  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/c1c939d69a8f04c3a7219de1c189be7b8e175f30",
   "working_tree_dirty": true,
   "configs": [
     "phase1/anthropic:claude-opus-4-8"
@@ -29,9 +29,9 @@
     0
   ],
   "unmatched_confirmed_per_run": [
-    1,
-    1,
-    1
+    0,
+    0,
+    0
   ],
   "fully_deterministic": true,
   "fixtures": [
@@ -111,14 +111,14 @@
         1
       ],
       "confirmed_per_run": [
-        2,
-        2,
-        2
+        1,
+        1,
+        1
       ],
       "candidates_per_run": [
-        2,
-        2,
-        2
+        1,
+        1,
+        1
       ],
       "stable_across_runs": true,
       "errors": []
@@ -170,19 +170,19 @@
   ],
   "comparison": {
     "unmatched_ceiling": 0,
-    "candidate_unmatched_max": 1,
-    "unmatched_regression": true,
+    "candidate_unmatched_max": 0,
+    "unmatched_regression": false,
     "baseline_label": "Phase 0",
     "baseline_commit": "1fdaaf1",
     "candidate_label": "Phase 1",
-    "candidate_commit": "1fdaaf1",
+    "candidate_commit": "c1c939d",
     "true_positive_floor": 6,
     "candidate_true_positive_floor": 6,
     "true_positive_regression": false,
     "false_positive_ceiling": 0,
     "candidate_false_positive_max": 0,
     "false_positive_regression": false,
-    "passed": false,
+    "passed": true,
     "fixtures": [
       {
         "fixture": "bank-multi",
@@ -247,9 +247,9 @@
           1
         ],
         "candidate_confirmed": [
-          2,
-          2,
-          2
+          1,
+          1,
+          1
         ]
       },
       {
