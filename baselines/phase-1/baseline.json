@@ -1,10 +1,10 @@
 {
   "label": "Phase 1",
-  "captured_utc": "2026-07-21T10:51:35Z",
-  "commit": "c1c939d69a8f04c3a7219de1c189be7b8e175f30",
-  "commit_short": "c1c939d",
-  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/c1c939d69a8f04c3a7219de1c189be7b8e175f30",
-  "working_tree_dirty": true,
+  "captured_utc": "2026-07-21T10:54:50Z",
+  "commit": "ccdd8bfd43b998ce0ed390554571d9c941579262",
+  "commit_short": "ccdd8bf",
+  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/ccdd8bfd43b998ce0ed390554571d9c941579262",
+  "working_tree_dirty": false,
   "configs": [
     "phase1/anthropic:claude-opus-4-8"
   ],
@@ -173,9 +173,9 @@
     "candidate_unmatched_max": 0,
     "unmatched_regression": false,
     "baseline_label": "Phase 0",
-    "baseline_commit": "1fdaaf1",
+    "baseline_commit": "10fbec0",
     "candidate_label": "Phase 1",
-    "candidate_commit": "c1c939d",
+    "candidate_commit": "ccdd8bf",
     "true_positive_floor": 6,
     "candidate_true_positive_floor": 6,
     "true_positive_regression": false,

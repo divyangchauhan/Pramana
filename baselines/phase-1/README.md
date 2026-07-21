@@ -1,8 +1,6 @@
 # Phase 1 baseline
 
-Captured **2026-07-21T10:51:35Z** at commit [`c1c939d`](https://github.com/divyangchauhan/Pramana/commit/c1c939d69a8f04c3a7219de1c189be7b8e175f30) over **3 independent runs** of `phase1/anthropic:claude-opus-4-8`.
-
-> ⚠️ Captured with uncommitted changes to tracked files — the recorded commit does not fully describe the code that produced these numbers.
+Captured **2026-07-21T10:54:50Z** at commit [`ccdd8bf`](https://github.com/divyangchauhan/Pramana/commit/ccdd8bfd43b998ce0ed390554571d9c941579262) over **3 independent runs** of `phase1/anthropic:claude-opus-4-8`.
 
 This is the reference point for later phases. A refactor is a regression if it drops below the observed true-positive floor, or raises the negative-control false-positive ceiling.
 
@@ -33,7 +31,7 @@ uv run python -m pramana.eval.harness --provider anthropic --pipeline phase1 \
     --json runs/run-1.json --report-dir runs/reports-1
 ```
 
-## Comparison against Phase 0 (`1fdaaf1`)
+## Comparison against Phase 0 (`10fbec0`)
 
 ✅ **No regression**
 
