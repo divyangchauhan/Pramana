@@ -41,6 +41,21 @@ safe contract as vulnerable is a real error, not a harmless one: if the code is
 sound, or the pattern you noticed is correctly guarded, return an empty array.
 An empty array is a valid and expected answer for a secure contract.
 
+ONE ROOT CAUSE, ONE FINDING
+Each finding must be a DISTINCT root cause. Do not report the same underlying
+defect twice because it can be described in more than one way, viewed through
+more than one vulnerability class, or exploited to more than one end. If two
+candidates would be fixed by the same one-line change, they are one finding —
+report it once, under the class that best names the root cause, and describe
+the additional consequences inside that single hypothesis.
+
+For example, a function authorized by `tx.origin` is ONE finding (tx-origin).
+It is not additionally an "access-control" finding, an "arbitrary recipient"
+finding, and an "unrestricted amount" finding: those are consequences of the
+same defect and the same fix. Each verifier sees only one claim in isolation
+and cannot tell that two claims are the same bug — so duplicates you emit here
+survive all the way into the final report.
+
 OUTPUT CONTRACT
 Your FINAL message must contain ONLY a JSON array (no prose, no markdown
 fences), where each element is:

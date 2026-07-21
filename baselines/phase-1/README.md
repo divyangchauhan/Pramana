@@ -1,6 +1,6 @@
-# Phase 0 baseline
+# Phase 1 baseline
 
-Captured **2026-07-21T10:35:22Z** at commit [`1fdaaf1`](https://github.com/divyangchauhan/Pramana/commit/1fdaaf1aac92f448f368ab3636b8ac63f4240f75) over **3 independent runs** of `anthropic:claude-opus-4-8`.
+Captured **2026-07-21T10:35:22Z** at commit [`1fdaaf1`](https://github.com/divyangchauhan/Pramana/commit/1fdaaf1aac92f448f368ab3636b8ac63f4240f75) over **3 independent runs** of `phase1/anthropic:claude-opus-4-8`.
 
 > ⚠️ Captured with uncommitted changes to tracked files — the recorded commit does not fully describe the code that produced these numbers.
 
@@ -11,7 +11,7 @@ This is the reference point for later phases. A refactor is a regression if it d
 | `bank-multi` | 2 | 2, 2, 2 | 2, 2, 2 | ✅ |
 | `reentrancy-vault` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 | `reentrancy-vault-patched` | 0 *(control)* | 0, 0, 0 | 0, 0, 0 | ✅ |
-| `tx-origin-wallet` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
+| `tx-origin-wallet` | 1 | 1, 1, 1 | 2, 2, 2 | ✅ |
 | `unchecked-overflow-token` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 | `unprotected-owner` | 1 | 1, 1, 1 | 1, 1, 1 | ✅ |
 
@@ -29,6 +29,23 @@ This is the reference point for later phases. A refactor is a regression if it d
 Reproduce with:
 
 ```bash
-uv run python -m pramana.eval.harness --provider anthropic --pipeline phase0 \
+uv run python -m pramana.eval.harness --provider anthropic --pipeline phase1 \
     --json runs/run-1.json --report-dir runs/reports-1
 ```
+
+## Comparison against Phase 0 (`1fdaaf1`)
+
+❌ **Regression**
+
+- True positives: floor **6** vs baseline floor **6** — gate held
+- Negative-control false positives: worst **0** vs baseline ceiling **0** — gate held
+- Unmatched confirmed findings: worst **1** vs baseline ceiling **0** — REGRESSION
+
+| Fixture | Baseline TP (floor) | Candidate TP (floor) | Δ |
+|---|:---:|:---:|:---:|
+| `bank-multi` | 2 | 2 | — |
+| `reentrancy-vault` | 1 | 1 | — |
+| `reentrancy-vault-patched` *(control)* | 0 | 0 | — |
+| `tx-origin-wallet` | 1 | 1 | — |
+| `unchecked-overflow-token` | 1 | 1 | — |
+| `unprotected-owner` | 1 | 1 | — |

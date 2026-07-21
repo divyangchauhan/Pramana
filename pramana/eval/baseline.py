@@ -84,6 +84,16 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
     totals = [r["true_positive_findings"] for r in runs]
     control_fps = [r.get("negative_control_false_positives", 0) for r in runs]
     control_proven = [r.get("negative_control_proven_false_positives", 0) for r in runs]
+    # Recomputed from the per-fixture rows rather than read from the summary, so
+    # baselines recorded before this metric existed stay directly comparable.
+    unmatched = [
+        sum(
+            row["n_confirmed"] - row["true_positive_findings"]
+            for row in r["fixtures"]
+            if row["n_known_bugs"]
+        )
+        for r in runs
+    ]
     configs = sorted({row["config"] for r in runs for row in r["fixtures"]})
 
     return {
@@ -102,6 +112,7 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
         "true_positives_mean": round(statistics.fmean(totals), 2),
         "negative_control_false_positives_per_run": control_fps,
         "negative_control_proven_false_positives_per_run": control_proven,
+        "unmatched_confirmed_per_run": unmatched,
         "fully_deterministic": all(s.stable() for s in stats.values()),
         "fixtures": [
             {
@@ -224,6 +235,8 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
     fp_ceiling = max(baseline["negative_control_false_positives_per_run"] or [0])
     tp_min = candidate["true_positives_min"]
     fp_max = max(candidate["negative_control_false_positives_per_run"] or [0])
+    unmatched_ceiling = max(baseline.get("unmatched_confirmed_per_run") or [0])
+    unmatched_max = max(candidate.get("unmatched_confirmed_per_run") or [0])
 
     base_by_fixture = {f["fixture"]: f for f in baseline["fixtures"]}
     fixtures = []
@@ -246,7 +259,11 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
 
     tp_regression = tp_min < tp_floor
     fp_regression = fp_max > fp_ceiling
+    unmatched_regression = unmatched_max > unmatched_ceiling
     return {
+        "unmatched_ceiling": unmatched_ceiling,
+        "candidate_unmatched_max": unmatched_max,
+        "unmatched_regression": unmatched_regression,
         "baseline_label": baseline["label"],
         "baseline_commit": baseline["commit_short"],
         "candidate_label": candidate["label"],
@@ -257,7 +274,7 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
         "false_positive_ceiling": fp_ceiling,
         "candidate_false_positive_max": fp_max,
         "false_positive_regression": fp_regression,
-        "passed": not (tp_regression or fp_regression),
+        "passed": not (tp_regression or fp_regression or unmatched_regression),
         "fixtures": fixtures,
     }
 
@@ -275,6 +292,9 @@ def render_comparison(c: dict[str, Any]) -> str:
         f"- Negative-control false positives: worst **{c['candidate_false_positive_max']}** vs "
         f"baseline ceiling **{c['false_positive_ceiling']}** — "
         + ("REGRESSION" if c["false_positive_regression"] else "gate held"),
+        f"- Unmatched confirmed findings: worst **{c.get('candidate_unmatched_max', 0)}** vs "
+        f"baseline ceiling **{c.get('unmatched_ceiling', 0)}** — "
+        + ("REGRESSION" if c.get("unmatched_regression") else "gate held"),
         "",
         "| Fixture | Baseline TP (floor) | Candidate TP (floor) | Δ |",
         "|---|:---:|:---:|:---:|",

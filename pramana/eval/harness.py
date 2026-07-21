@@ -311,6 +311,13 @@ def summarize(rows: list[FixtureRow]) -> dict:
         "negative_control_fixtures": [r.fixture for r in controls],
         "negative_control_false_positives": sum(r.n_confirmed for r in controls),
         "negative_control_proven_false_positives": sum(r.confirmed_poc_pass for r in controls),
+        # Confirmed findings on a *labeled* fixture that matched no known bug:
+        # duplicates of an already-claimed bug, or claims about something that
+        # isn't a labeled vulnerability. Recall cannot see these — a pipeline
+        # can hold 6/6 while flooding the report with restated findings.
+        "unmatched_confirmed_findings": sum(
+            r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs
+        ),
         # `report_markdown` is deliberately excluded: reports are written as
         # standalone files by --report-dir, and inlining them bloats the JSON.
         "fixtures": [
@@ -346,6 +353,11 @@ def print_report(rows: list[FixtureRow]) -> None:
 
     # Negative controls (recall "-") carry no known bugs: any confirmed finding
     # on one is a false positive, and a *passing* PoC on one is a proven FP.
+    unmatched = sum(r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs)
+    if unmatched:
+        print(f"UNMATCHED — {unmatched} confirmed finding(s) on labeled fixtures matched no "
+              "known bug (duplicate or spurious); recall cannot see these")
+
     controls = [r for r in rows if r.n_known_bugs == 0]
     if controls:
         fp = sum(r.n_confirmed for r in controls)

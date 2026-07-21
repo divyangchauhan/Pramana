@@ -1,12 +1,12 @@
 {
-  "label": "Phase 0",
+  "label": "Phase 1",
   "captured_utc": "2026-07-21T10:35:22Z",
   "commit": "1fdaaf1aac92f448f368ab3636b8ac63f4240f75",
   "commit_short": "1fdaaf1",
   "commit_url": "https://github.com/divyangchauhan/Pramana/commit/1fdaaf1aac92f448f368ab3636b8ac63f4240f75",
   "working_tree_dirty": true,
   "configs": [
-    "anthropic:claude-opus-4-8"
+    "phase1/anthropic:claude-opus-4-8"
   ],
   "n_runs": 3,
   "total_known_bugs": 6,
@@ -29,9 +29,9 @@
     0
   ],
   "unmatched_confirmed_per_run": [
-    0,
-    0,
-    0
+    1,
+    1,
+    1
   ],
   "fully_deterministic": true,
   "fixtures": [
@@ -111,14 +111,14 @@
         1
       ],
       "confirmed_per_run": [
-        1,
-        1,
-        1
+        2,
+        2,
+        2
       ],
       "candidates_per_run": [
-        1,
-        1,
-        1
+        2,
+        2,
+        2
       ],
       "stable_across_runs": true,
       "errors": []
@@ -167,5 +167,125 @@
       "stable_across_runs": true,
       "errors": []
     }
-  ]
+  ],
+  "comparison": {
+    "unmatched_ceiling": 0,
+    "candidate_unmatched_max": 1,
+    "unmatched_regression": true,
+    "baseline_label": "Phase 0",
+    "baseline_commit": "1fdaaf1",
+    "candidate_label": "Phase 1",
+    "candidate_commit": "1fdaaf1",
+    "true_positive_floor": 6,
+    "candidate_true_positive_floor": 6,
+    "true_positive_regression": false,
+    "false_positive_ceiling": 0,
+    "candidate_false_positive_max": 0,
+    "false_positive_regression": false,
+    "passed": false,
+    "fixtures": [
+      {
+        "fixture": "bank-multi",
+        "is_negative_control": false,
+        "baseline_tp_floor": 2,
+        "candidate_tp_floor": 2,
+        "delta": 0,
+        "baseline_confirmed": [
+          2,
+          2,
+          2
+        ],
+        "candidate_confirmed": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "fixture": "reentrancy-vault",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "fixture": "reentrancy-vault-patched",
+        "is_negative_control": true,
+        "baseline_tp_floor": 0,
+        "candidate_tp_floor": 0,
+        "delta": 0,
+        "baseline_confirmed": [
+          0,
+          0,
+          0
+        ],
+        "candidate_confirmed": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "fixture": "tx-origin-wallet",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "fixture": "unchecked-overflow-token",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      },
+      {
+        "fixture": "unprotected-owner",
+        "is_negative_control": false,
+        "baseline_tp_floor": 1,
+        "candidate_tp_floor": 1,
+        "delta": 0,
+        "baseline_confirmed": [
+          1,
+          1,
+          1
+        ],
+        "candidate_confirmed": [
+          1,
+          1,
+          1
+        ]
+      }
+    ]
+  }
 }
