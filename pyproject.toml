@@ -49,5 +49,7 @@ extend-exclude = ["pramana/eval/foundry_template/lib"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-# prompts.py is mostly literal prompt text; line length is not meaningful there.
+# These are mostly literal prompt text; line length is not meaningful there.
 "pramana/agents/prompts.py" = ["E501"]
+"pramana/agents/finder.py" = ["E501"]
+"pramana/agents/verifier.py" = ["E501"]
