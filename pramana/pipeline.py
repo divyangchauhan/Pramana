@@ -194,7 +194,7 @@ def _quarantine_unconfirmed(ctx: ToolContext, keep: set[str]) -> None:
         path.replace(quarantine / path.name)
 
 
-def _verify_one(
+def verify_finding(
     adapters: Mapping[str, LLMAdapter],
     config: AgentConfig,
     ctx: ToolContext,
@@ -203,6 +203,9 @@ def _verify_one(
     trace: TraceFn | None,
 ) -> tuple[Verdict, int]:
     """Run one context-isolated verification. Returns (verdict, forge runs used).
+
+    Public so a single hand-written claim can be put to the verifier directly
+    (see ``pramana.eval.refutation``) without going through the finder.
 
     The verifier gets a fresh ``run_agent`` call seeded with the bare claim
     alone — no finder notes, no severity guess, no prior messages.
@@ -339,7 +342,7 @@ def audit_phase1(
     confirmed_pocs: set[str] = set()
 
     for finding in findings:
-        verdict, used = _verify_one(adapters, config, ctx, finding, trace=trace)
+        verdict, used = verify_finding(adapters, config, ctx, finding, trace=trace)
         verdicts.append(verdict)
         attempts[finding.id] = used
         if verdict.verdict == "confirmed" and verdict.poc_path:
@@ -403,5 +406,6 @@ __all__ = [
     "audit",
     "audit_phase0",
     "audit_phase1",
+    "verify_finding",
     "result_summary",
 ]
