@@ -119,8 +119,9 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
     }
 
 
-def render_markdown(b: dict[str, Any]) -> str:
+def render_markdown(b: dict[str, Any], comparison: dict[str, Any] | None = None) -> str:
     stats = b["fixtures"]
+    pipeline, provider = _pipeline_and_provider(b["configs"][0])
     tp_span = (
         str(b["true_positives_min"])
         if b["true_positives_min"] == b["true_positives_max"]
@@ -186,10 +187,105 @@ def render_markdown(b: dict[str, Any]) -> str:
         "Reproduce with:",
         "",
         "```bash",
-        f"uv run python -m pramana.eval.harness --provider {b['configs'][0].split(':')[0]} \\",
+        f"uv run python -m pramana.eval.harness --provider {provider} --pipeline {pipeline} \\",
         "    --json runs/run-1.json --report-dir runs/reports-1",
         "```",
     ]
+    if comparison is not None:
+        lines += ["", render_comparison(comparison).rstrip()]
+    return "\n".join(lines) + "\n"
+
+
+def _pipeline_and_provider(config_label: str) -> tuple[str, str]:
+    """Split a run label back into (pipeline, provider).
+
+    Labels look like ``phase1/anthropic:claude-opus-4-8`` or, when roles are
+    routed apart, ``phase1/finder=anthropic:a,verifier=anthropic:b``. Baselines
+    recorded before labels carried a pipeline prefix are read as phase0.
+    """
+    pipeline, sep, rest = config_label.partition("/")
+    if not sep:
+        pipeline, rest = "phase0", config_label
+    first = rest.split(",")[0]
+    if "=" in first:
+        first = first.split("=", 1)[1]
+    return pipeline, first.split(":")[0]
+
+
+def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
+    """Check a candidate baseline against an earlier one's regression gate.
+
+    The gate is a floor and a ceiling, not an average: a refactor regresses if
+    its *worst* run finds fewer true positives than the baseline's worst run, or
+    if its *worst* run produces more negative-control false positives than the
+    baseline's worst. Comparing means would let a lucky run mask a bad one.
+    """
+    tp_floor = baseline["true_positives_min"]
+    fp_ceiling = max(baseline["negative_control_false_positives_per_run"] or [0])
+    tp_min = candidate["true_positives_min"]
+    fp_max = max(candidate["negative_control_false_positives_per_run"] or [0])
+
+    base_by_fixture = {f["fixture"]: f for f in baseline["fixtures"]}
+    fixtures = []
+    for f in candidate["fixtures"]:
+        prior = base_by_fixture.get(f["fixture"])
+        if prior is None:
+            continue
+        before, after = min(prior["true_positives_per_run"]), min(f["true_positives_per_run"])
+        fixtures.append(
+            {
+                "fixture": f["fixture"],
+                "is_negative_control": f["is_negative_control"],
+                "baseline_tp_floor": before,
+                "candidate_tp_floor": after,
+                "delta": after - before,
+                "baseline_confirmed": prior["confirmed_per_run"],
+                "candidate_confirmed": f["confirmed_per_run"],
+            }
+        )
+
+    tp_regression = tp_min < tp_floor
+    fp_regression = fp_max > fp_ceiling
+    return {
+        "baseline_label": baseline["label"],
+        "baseline_commit": baseline["commit_short"],
+        "candidate_label": candidate["label"],
+        "candidate_commit": candidate["commit_short"],
+        "true_positive_floor": tp_floor,
+        "candidate_true_positive_floor": tp_min,
+        "true_positive_regression": tp_regression,
+        "false_positive_ceiling": fp_ceiling,
+        "candidate_false_positive_max": fp_max,
+        "false_positive_regression": fp_regression,
+        "passed": not (tp_regression or fp_regression),
+        "fixtures": fixtures,
+    }
+
+
+def render_comparison(c: dict[str, Any]) -> str:
+    verdict = "✅ **No regression**" if c["passed"] else "❌ **Regression**"
+    lines = [
+        f"## Comparison against {c['baseline_label']} (`{c['baseline_commit']}`)",
+        "",
+        verdict,
+        "",
+        f"- True positives: floor **{c['candidate_true_positive_floor']}** vs baseline floor "
+        f"**{c['true_positive_floor']}** — "
+        + ("REGRESSION" if c["true_positive_regression"] else "gate held"),
+        f"- Negative-control false positives: worst **{c['candidate_false_positive_max']}** vs "
+        f"baseline ceiling **{c['false_positive_ceiling']}** — "
+        + ("REGRESSION" if c["false_positive_regression"] else "gate held"),
+        "",
+        "| Fixture | Baseline TP (floor) | Candidate TP (floor) | Δ |",
+        "|---|:---:|:---:|:---:|",
+    ]
+    for f in c["fixtures"]:
+        name = f"`{f['fixture']}`" + (" *(control)*" if f["is_negative_control"] else "")
+        delta = f["delta"]
+        mark = "—" if delta == 0 else (f"+{delta}" if delta > 0 else str(delta))
+        lines.append(
+            f"| {name} | {f['baseline_tp_floor']} | {f['candidate_tp_floor']} | {mark} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -198,13 +294,28 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--runs", nargs="+", type=Path, required=True, help="harness --json outputs")
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--label", default="Phase 0")
+    ap.add_argument("--against", type=Path,
+                    help="an earlier baseline.json to check for regression; "
+                         "exits non-zero if its gate is broken")
     args = ap.parse_args(argv)
 
     baseline = aggregate(args.runs, args.label)
+
+    comparison = None
+    if args.against:
+        comparison = compare(baseline, json.loads(args.against.read_text()))
+        baseline["comparison"] = comparison
+
     args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "baseline.json").write_text(json.dumps(baseline, indent=2) + "\n")
-    (args.out_dir / "README.md").write_text(render_markdown(baseline))
+    (args.out_dir / "README.md").write_text(render_markdown(baseline, comparison))
     print(f"wrote baseline for {baseline['n_runs']} run(s) to {args.out_dir}")
+
+    if comparison is not None:
+        print()
+        print(render_comparison(comparison))
+        if not comparison["passed"]:
+            return 1
     return 0
 
 
