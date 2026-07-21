@@ -315,10 +315,12 @@ def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> 
         "negative_control_fixtures": [r.fixture for r in controls],
         "negative_control_false_positives": sum(r.n_confirmed for r in controls),
         "negative_control_proven_false_positives": sum(r.confirmed_poc_pass for r in controls),
-        # Confirmed findings on a *labeled* fixture that matched no known bug:
-        # duplicates of an already-claimed bug, or claims about something that
-        # isn't a labeled vulnerability. Recall cannot see these — a pipeline
-        # can hold 6/6 while flooding the report with restated findings.
+        # Confirmed findings on a *labeled* fixture that matched no known bug.
+        # Recall cannot see these — a pipeline can hold 6/6 while flooding the
+        # report. But the count conflates three things and only a human reading
+        # the finding can separate them: a duplicate of an already-claimed bug,
+        # a spurious claim, or a REAL bug missing from fixture.json. Treat a
+        # non-zero value as "look at this", never as "the model was wrong".
         "unmatched_confirmed_findings": sum(
             r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs
         ),
@@ -360,7 +362,8 @@ def print_report(rows: list[FixtureRow]) -> None:
     unmatched = sum(r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs)
     if unmatched:
         print(f"UNMATCHED — {unmatched} confirmed finding(s) on labeled fixtures matched no "
-              "known bug (duplicate or spurious); recall cannot see these")
+              "known bug; recall cannot see these. Review each: duplicate, "
+              "spurious, or a real bug missing from the label set?")
 
     controls = [r for r in rows if r.n_known_bugs == 0]
     if controls:
