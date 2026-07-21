@@ -32,7 +32,7 @@ That single design choice — *executable proof over model confidence* — is th
 
 The headline metric is **true-positive findings confirmed with an executable PoC** — a finding the harness *independently re-runs and watches pass* in a clean workspace, matched to a known real vulnerability.
 
-Full corpus, live run with `claude-opus-4-8`:
+Full corpus, live with `claude-opus-4-8`, **repeated 3× — identical every run**:
 
 | Fixture | Vulnerability class(es) | Known bugs | Proven with PoC | True positives |
 |---|---|:---:|:---:|:---:|
@@ -41,8 +41,18 @@ Full corpus, live run with `claude-opus-4-8`:
 | `tx-origin-wallet` | tx-origin | 1 | ✅ | 1 |
 | `unchecked-overflow-token` | integer-overflow | 1 | ✅ | 1 |
 | `bank-multi` | reentrancy **+** access-control | 2 | ✅ ✅ | 2 |
+| `reentrancy-vault-patched` | *none — negative control* | 0 | — | 0 **(0 false positives)** |
 
-**6 / 6 true positives · recall 1.00 · precision 1.00.** Every finding came with a Foundry exploit that the harness re-ran, from scratch, against the untouched target contract — including the composite `bank-multi`, where both distinct bugs were found and proven independently.
+**6 / 6 true positives · recall 1.00 · precision 1.00 · 0 false positives on the negative control.** Every finding came with a Foundry exploit that the harness re-ran, from scratch, against the untouched target contract — including the composite `bank-multi`, where both distinct bugs were found and proven independently.
+
+The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the agent wrote a reentrancy exploit, ran it, **watched it fail**, and reported no vulnerability:
+
+> `withdraw()` zeroes the balance (effect) **before** the external call (interaction). A reentrant call finds a zero balance and reverts. […] The test PASSES demonstrating the exploit does NOT work.
+> — [`baselines/phase-0/reports/reentrancy-vault-patched.md`](baselines/phase-0/reports/reentrancy-vault-patched.md)
+
+That is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported.
+
+📊 **[Full baseline record →](baselines/phase-0/)** — all 3 runs, per-fixture stability, pinned commit and config, and the regression gate later phases are measured against. The agent's own audit reports for every fixture are committed alongside it.
 
 An offline `--self-check` reproduces the entire scoring pipeline (workspace build → `forge test` → class match → count) with **no API key required**.
 
@@ -157,6 +167,17 @@ cp .env.example .env         # fill in ANTHROPIC_API_KEY (or OPENAI / MOONSHOT)
 uv run python -m pramana.eval.harness --provider anthropic
 ```
 
+**Capture a baseline** — repeat the run, then fold the results into a committed regression record (the pipeline is nondeterministic, so a single run is a point estimate, not a baseline):
+
+```bash
+for i in 1 2 3; do
+  uv run python -m pramana.eval.harness --provider anthropic \
+      --json runs/run-$i.json --report-dir runs/reports-$i
+done
+uv run python -m pramana.eval.baseline --runs runs/run-*.json \
+    --out-dir baselines/phase-0 --label "Phase 0"
+```
+
 <details>
 <summary>More options</summary>
 
@@ -207,7 +228,9 @@ pramana/
     ├── datasets/       # the real-world corpus (5 vulnerable fixtures / 6 known bugs + 1 negative control)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
-    └── harness.py      # runs audit() over fixtures, counts true positives
+    ├── harness.py      # runs audit() over fixtures, counts true positives
+    └── baseline.py     # folds repeated runs into a committed regression baseline
+baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
 tests/                  # 42 offline tests (parsing, matching, grading, retries, wire translation, env, negative control)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
@@ -223,7 +246,7 @@ uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```
 
-Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching), the grading paths (a non-passing PoC or wrong class never counts), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for all three labs, and env validation. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching), the grading paths (a non-passing PoC or wrong class never counts), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for all three labs, env validation, baseline aggregation over disagreeing runs, and the negative control's own integrity — including replaying the real exploit against the patched twin to prove it fails. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ---
 
@@ -232,9 +255,9 @@ Tests cover boundary JSON parsing, vulnerability-class matching (including multi
 Pramana is built as a **vertical slice first**, deepening before it widens — every phase is a refactor of a working, demoable system, never a rewrite. Full plan in [`docs/design.md`](docs/design.md).
 
 - **Phase 0 — Vertical slice** ✅ *(this repo)* — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus.
-- **Phase 1 — Split the verifier** — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis.
+- **Phase 1 — Split the verifier** — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis. Measured against the [Phase 0 baseline](baselines/phase-0/): it must not drop below 6 true positives or exceed 0 negative-control false positives.
 - **Phase 2 — Finder + reporter + routing** — three specialized agents; per-role model routing swept by the harness; Slither/compile caching.
-- **Phase 3 — Scale & harden** — public benchmarks, paired vulnerable/patched negative controls, structured observability, and cost-per-role reporting.
+- **Phase 3 — Scale & harden** — public benchmarks, a full paired vulnerable/patched set, structured observability, and cost-per-role reporting.
 
 The three agents have fixed identities — **Anumana** (finder / inference), **Khandana** (verifier / refutation), **Nirnaya** (reporter / conclusion) — the three *pramāṇas* by which a finding becomes proven knowledge.
 
