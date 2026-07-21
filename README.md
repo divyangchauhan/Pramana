@@ -54,6 +54,8 @@ The single-agent Phase 0 run reached the same verdict by a more legible route: i
 
 Either way it is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported. Worth noting honestly: the split makes the *clean-contract* report thinner, since a claim filtered out at the proposal stage leaves no record of what was checked. That is a deliverable-quality gap no current metric captures, and a job for the Phase 2 reporter.
 
+> **Measurement caveat.** These three runs predate a corpus change. Every fixture's source comments used to explain its own bug (`BUG: tx.origin authentication is phishable`), which the agent reads — so they partly measured reading comprehension. Those comments have been [removed](baselines/#the-corpus-changed); the contracts are otherwise untouched and all six reference exploits still pass. Re-measurement on the hint-free corpus stopped after one clean run when API credits ran out: it held **6 / 6 with 0 false positives**, but one run is not a baseline. See [`baselines/`](baselines/).
+
 📊 **[Full baseline record →](baselines/phase-1/)** — all 3 runs, per-fixture stability, pinned commit and config, and the regression check against [Phase 0](baselines/phase-0/). The agent's own audit reports for every fixture are committed alongside it.
 
 An offline `--self-check` reproduces the entire scoring pipeline (workspace build → `forge test` → class match → count) with **no API key required**.
@@ -155,6 +157,8 @@ Five self-contained fixtures, each modeled on a landmark real-world exploit, wit
 | `bank-multi` | reentrancy **+** access-control | composite two-bug contract — exercises 1:1 matching |
 
 Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline.
+
+**No tells.** Target sources carry only the comments a developer who *didn't know about the bug* would have written — they describe intent, not defects. A fixture that documents its own vulnerability measures reading comprehension instead of discovery, so tests reject bug-naming words in target comments, and every run records a corpus fingerprint: results from different corpora are never compared.
 
 **Negative control.** Recall alone can be gamed by a model that reports everything, so the corpus also ships `reentrancy-vault-patched` — an otherwise identical twin of `reentrancy-vault` whose `withdraw()` applies the effect before the interaction. It declares **zero** known bugs, so every confirmed finding against it is unambiguously a false positive. Its `reference/` holds control tests rather than an exploit, asserting both that the drain now reverts *and* that honest withdrawals still succeed — a degenerate always-revert "fix" would otherwise pass as safe. CI additionally replays the real exploit against the patched twin and requires it to fail, so the control cannot silently rot.
 
@@ -267,10 +271,9 @@ pramana/
     ├── workspace.py    # per-run Foundry workspaces
     ├── harness.py      # runs audit() over fixtures, counts true positives
     └── baseline.py     # folds repeated runs into a baseline; gates later phases
-baselines/phase-0/      # recorded baselines + the agent's audit reports
-baselines/phase-1/
+baselines/              # recorded baselines + the agent's audit reports
 baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
-tests/                  # 88 offline tests (parsing, grading, isolation, tool scope, retries, wire translation, negative control)
+tests/                  # 105 offline tests (parsing, grading, isolation, tool scope, corpus integrity, negative control)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -280,7 +283,7 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 88 offline tests, no network/keys
+uv run pytest                      # 105 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```

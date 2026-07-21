@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from pramana.eval.baseline import (
     _unmatched_per_run,
     aggregate,
@@ -91,11 +93,24 @@ def test_negative_control_false_positives_are_tracked_per_run(tmp_path):
     assert "must not exceed **1**" in render_markdown(b)
 
 
-def test_fixture_errors_are_carried_into_the_record(tmp_path):
+def test_aggregate_refuses_runs_with_errored_fixtures(tmp_path):
+    """Exhausted API credits mid-sweep score every remaining fixture 0. Folding
+    that in would record an infrastructure failure as a capability measurement
+    and drag the regression floor to zero."""
+    good = _run(tmp_path, "r1.json", [_row("a", 1, 1)])
+    bad_row = _row("a", 0, 1)
+    bad_row["error"] = "ProviderError: credit balance is too low"
+    bad = _run(tmp_path, "r2.json", [bad_row])
+
+    with pytest.raises(SystemExit, match="errored fixtures"):
+        aggregate([good, bad], "Phase 1")
+
+
+def test_aggregate_names_the_run_and_fixtures_that_failed(tmp_path):
     row = _row("a", 0, 1)
     row["error"] = "ProviderError: overloaded"
-    b = aggregate([_run(tmp_path, "r1.json", [row])], "Phase 0")
-    assert b["fixtures"][0]["errors"] == ["ProviderError: overloaded"]
+    with pytest.raises(SystemExit, match=r"r1\.json: a"):
+        aggregate([_run(tmp_path, "r1.json", [row])], "Phase 0")
 
 
 def test_comparison_passes_when_the_candidate_holds_the_gate(tmp_path):
@@ -190,6 +205,56 @@ def test_unmatched_regression_is_caught_while_recall_holds(tmp_path):
     assert c["false_positive_regression"] is False, "no control false positives"
     assert c["unmatched_regression"] is True
     assert c["passed"] is False
+
+
+def test_comparison_refuses_a_verdict_across_different_corpora(tmp_path):
+    """Stripping the bug-explaining comments changed the fixtures, so the old
+    numbers describe a different problem. The gate must say so, not score it."""
+    old_run = _run(tmp_path, "o1.json", [_row("a", 1, 1)])
+    old_run.write_text(json.dumps({**json.loads(old_run.read_text()), "corpus_fingerprint": "aaa"}))
+    new_run = _run(tmp_path, "n1.json", [_row("a", 0, 1)])
+    new_run.write_text(json.dumps({**json.loads(new_run.read_text()), "corpus_fingerprint": "bbb"}))
+
+    c = compare(aggregate([new_run], "Phase 1"), aggregate([old_run], "Phase 0"))
+    assert c["corpus_mismatch"] is True
+    assert c["passed"] is False
+    assert "Not comparable" in render_comparison(c)
+
+
+def test_comparison_marks_an_unfingerprinted_baseline_as_unverified(tmp_path):
+    """Silence would imply the corpora were checked and matched."""
+    old = aggregate([_run(tmp_path, "o1.json", [_row("a", 1, 1)])], "Phase 0")
+    new_run = _run(tmp_path, "n1.json", [_row("a", 1, 1)])
+    new_run.write_text(json.dumps({**json.loads(new_run.read_text()), "corpus_fingerprint": "bbb"}))
+
+    c = compare(aggregate([new_run], "Phase 1"), old)
+    assert c["corpus_mismatch"] is False
+    assert c["corpus_unverified"] is True
+    assert c["passed"] is True, "advisory, not a failure"
+    assert "could not be confirmed" in render_comparison(c)
+
+
+def test_matching_fingerprints_are_neither_mismatched_nor_unverified(tmp_path):
+    runs = []
+    for name in ("o1.json", "n1.json"):
+        r = _run(tmp_path, name, [_row("a", 1, 1)])
+        r.write_text(json.dumps({**json.loads(r.read_text()), "corpus_fingerprint": "same"}))
+        runs.append(r)
+
+    c = compare(aggregate([runs[1]], "Phase 1"), aggregate([runs[0]], "Phase 0"))
+    assert c["corpus_mismatch"] is False
+    assert c["corpus_unverified"] is False
+    assert "could not be confirmed" not in render_comparison(c)
+
+
+def test_aggregate_refuses_to_mix_runs_from_different_corpora(tmp_path):
+    a = _run(tmp_path, "a.json", [_row("a", 1, 1)])
+    a.write_text(json.dumps({**json.loads(a.read_text()), "corpus_fingerprint": "aaa"}))
+    b = _run(tmp_path, "b.json", [_row("a", 1, 1)])
+    b.write_text(json.dumps({**json.loads(b.read_text()), "corpus_fingerprint": "bbb"}))
+
+    with pytest.raises(SystemExit, match="different corpora"):
+        aggregate([a, b], "Phase 1")
 
 
 def test_reproduce_command_round_trips_the_pipeline_from_the_label(tmp_path):

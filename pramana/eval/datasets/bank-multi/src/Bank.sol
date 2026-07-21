@@ -2,15 +2,9 @@
 pragma solidity ^0.8.0;
 
 /// @title Bank
-/// @notice A deposit vault that deliberately carries TWO independent,
-///         separately-exploitable vulnerabilities — a multi-bug fixture that
-///         exercises the harness's one-to-one matching of findings to known bugs.
-///
-///  1. Reentrancy (The DAO, 2016): withdraw() performs the external ETH transfer
-///     BEFORE zeroing the caller's balance, so a malicious receiver can re-enter
-///     and drain other depositors.
-///  2. Access control (Parity-style): setAdmin() has no authorization, so anyone
-///     can make themselves admin and sweep() the entire balance.
+/// @notice A deposit vault with an administrator. Depositors may withdraw their
+///         own balance; the admin can sweep the contract's funds to a chosen
+///         address, e.g. when migrating to a new deployment.
 contract Bank {
     mapping(address => uint256) public balances;
     address public admin;
@@ -19,11 +13,12 @@ contract Bank {
         admin = msg.sender;
     }
 
+    /// @notice Deposit ETH and credit it to the sender.
     function deposit() external payable {
         balances[msg.sender] += msg.value;
     }
 
-    /// BUG 1 — reentrancy: interaction before effect.
+    /// @notice Withdraw the caller's entire balance.
     function withdraw() external {
         uint256 bal = balances[msg.sender];
         require(bal > 0, "no balance");
@@ -32,11 +27,12 @@ contract Bank {
         balances[msg.sender] = 0;
     }
 
-    /// BUG 2 — access control: no authorization, anyone can seize admin.
+    /// @notice Hand administration to `newAdmin`.
     function setAdmin(address newAdmin) external {
         admin = newAdmin;
     }
 
+    /// @notice Move the full contract balance to `to`.
     function sweep(address payable to) external {
         require(msg.sender == admin, "not admin");
         to.transfer(address(this).balance);

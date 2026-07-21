@@ -2,11 +2,9 @@
 pragma solidity ^0.8.0;
 
 /// @title Wallet
-/// @notice A funds-holding wallet modeled on the unprotected-initializer class
-///         of bug behind the Parity multisig incidents. Ownership is meant to
-///         be set once at construction, but `initOwner` is left callable by
-///         anyone with no "already initialized" guard, so an attacker can seize
-///         ownership at will and drain the balance.
+/// @notice A funds-holding wallet with a single owner. The deployer becomes the
+///         owner; ownership can be pointed at a new address during setup, and
+///         only the owner may withdraw the balance.
 contract Wallet {
     address public owner;
     bool private initialized;
@@ -16,14 +14,15 @@ contract Wallet {
         initialized = true;
     }
 
-    /// BUG: missing `require(!initialized)` (or any access control). Any caller
-    /// can overwrite `owner` after deployment.
+    /// @notice Set the wallet's owner to `newOwner`.
     function initOwner(address newOwner) external {
         owner = newOwner;
     }
 
+    /// @notice Add funds to the wallet.
     function deposit() external payable {}
 
+    /// @notice Withdraw the full balance. Restricted to the owner.
     function withdraw() external {
         require(msg.sender == owner, "not owner");
         (bool ok, ) = msg.sender.call{value: address(this).balance}("");
