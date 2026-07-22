@@ -16,6 +16,13 @@
       "location": "Bank.setAdmin()",
       "description": "setAdmin() has no authorization, so any account can seize admin and sweep() the entire balance.",
       "reference_poc": "reference/BankAdminTakeoverExploit.t.sol"
+    },
+    {
+      "id": "KB-3",
+      "vuln_class": "missing-zero-check",
+      "location": "Bank.sweep()",
+      "description": "sweep() does not validate `to`, and transfer to the zero address does not revert, so the entire balance can be permanently burned while depositors' recorded claims survive.",
+      "reference_poc": "reference/BankZeroSweepExploit.t.sol"
     }
   ]
 }

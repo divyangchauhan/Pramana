@@ -1,0 +1,14 @@
+{
+  "name": "signature-replay-vault",
+  "contract": "src/SignedVault.sol",
+  "reference_poc": "reference/SignatureReplayExploit.t.sol",
+  "inspiration": "SWC-121 missing protection against signature replay",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "signature-replay",
+      "location": "SignedVault.release()",
+      "description": "The signed digest covers only recipient and amount, with no nonce, deadline or record of spent authorizations, so a single signature can be submitted repeatedly until the vault is empty."
+    }
+  ]
+}

@@ -52,6 +52,10 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "tx-origin": ("tx-origin", "txorigin", "tx.origin"),
     "integer-overflow": ("overflow", "underflow", "arithmetic", "batchoverflow"),
     "unchecked-call": ("unchecked", "unchecked-return", "unchecked-call", "unchecked-send"),
+    "missing-zero-check": ("zero-address", "zero-check", "missing-zero", "zero-addr"),
+    "delegatecall": ("delegatecall", "delegate-call", "storage-collision"),
+    "weak-randomness": ("randomness", "weak-random", "predictable", "rng", "entropy"),
+    "signature-replay": ("replay", "signature-replay", "missing-nonce", "sig-replay"),
 }
 
 

@@ -9,15 +9,20 @@ from pramana.eval.harness import FixtureRow, grade, probes_from_reference, write
 from pramana.eval.workspace import load_fixtures
 
 
-def test_multi_bug_fixture_matches_two_distinct_bugs():
+def test_multi_bug_fixture_matches_every_bug_one_to_one():
+    """Not pinned to a bug count: the corpus grows, and what matters is that
+    each known bug is matched by exactly one PoC, never double-counted."""
     fx = load_fixtures(names=["bank-multi"])[0]
-    assert len(fx.known_bugs) == 2
+    n = len(fx.known_bugs)
+    assert n > 1, "bank-multi is the multi-bug fixture"
+    assert len({b.vuln_class for b in fx.known_bugs}) == n, "bugs must be distinct classes"
+
     with tempfile.TemporaryDirectory() as tmp:
         row = grade(fx, probes_from_reference(fx), Path(tmp), "test")
-    # Two distinct bugs, each proven by its own PoC, matched 1:1.
-    assert row.n_known_bugs == 2
-    assert row.confirmed_poc_pass == 2
-    assert row.true_positive_findings == 2
+
+    assert row.n_known_bugs == n
+    assert row.confirmed_poc_pass == n
+    assert row.true_positive_findings == n
     assert row.recall == 1.0
 
 

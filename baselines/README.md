@@ -11,10 +11,11 @@ rather than a regression verdict.
 
 | Record | Pipeline | Corpus | Status |
 |---|---|---|---|
+| *(none yet)* | finder → isolated verifier | `007869fd6cad` — **current**, 11 bugs | **pending re-measurement** |
 | [`phase-0/`](phase-0/) | single combined agent | pre-strip | superseded |
 | [`phase-1/`](phase-1/) | finder → isolated verifier | pre-strip | superseded |
-| [`phase-1-nohints/`](phase-1-nohints/) | finder → isolated verifier | `bee662ded628` | **reference** *(provisional, n=1)* |
-| [`phase-1-kimi-k3/`](phase-1-kimi-k3/) | finder → isolated verifier | `bee662ded628` | sweep row, not a gate *(n=1)* |
+| [`phase-1-nohints/`](phase-1-nohints/) | finder → isolated verifier | `bee662ded628` — 6 bugs | superseded by corpus growth |
+| [`phase-1-kimi-k3/`](phase-1-kimi-k3/) | finder → isolated verifier | `bee662ded628` — 6 bugs | superseded; kept as the first sweep row |
 
 ## Why the earlier records are superseded
 
@@ -30,12 +31,16 @@ stripped afterwards. That decision stands; the records are kept as history
 rather than re-run, since re-measuring Phase 0 would cost three runs to
 re-confirm a conclusion that was never in doubt.
 
-## The current reference
+## There is currently no valid reference
 
-`phase-1-nohints/` is the gating reference going forward: same pipeline, on the
-corpus with no tells. **It is provisional — one run.** Two more are needed
-before its floor should be trusted as a gate; a single observation cannot
-separate a real result from run-to-run variance.
+The corpus grew from 6 labeled bugs to 11 across 9 classes (`007869fd6cad`),
+which supersedes every record here — including the `phase-1-nohints/` one that
+was briefly the reference. Nothing was lost: it was provisional at n=1 anyway,
+and expanding the corpus before spending runs on it is strictly cheaper than
+after.
+
+**Next measurement: 3 runs of `phase1` on `007869fd6cad`.** That becomes the
+gating reference.
 
 | Metric | Pre-strip (3 runs) | Hint-free (1 run) |
 |---|:---:|:---:|
