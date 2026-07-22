@@ -60,6 +60,21 @@ Either way it is the difference between reasoning about code and pattern-matchin
 
 An offline `--self-check` reproduces the entire scoring pipeline (workspace build → `forge test` → class match → count) with **no API key required**.
 
+### Does the verifier ever actually disagree?
+
+In every recorded corpus run, *every* candidate the finder proposed was confirmed — zero refuted. That is consistent with a well-calibrated finder **or** a verifier that rubber-stamps whatever it is handed, and the corpus eval cannot separate them, because the finder never hands the verifier a bad claim.
+
+So `pramana.eval.refutation` puts hand-written claims to the verifier directly, bypassing the finder — in both directions, since a verifier that refuted *everything* would sail through a refutation-only check while being equally useless:
+
+```
+probe                        expected       kimi-k3    gpt-5.5
+true-claim-control           confirmed      confirmed  confirmed
+false-claim-patched-twin     not confirmed  refuted    refuted
+false-claim-wrong-mechanism  not confirmed  refuted    refuted
+```
+
+It discriminates on both labs. On the patched twin `kimi-k3` spent two forge runs *attempting* the exploit before refuting it — and in a real corpus run it refuted a `missing-zero-check` claim its own finder had proposed. The zero-refutation record reflects a calibrated finder, not a rubber stamp.
+
 ### What the eval caught that recall could not
 
 Every architectural change is checked against the previous phase's recorded baseline, as a floor and a ceiling rather than an average — a lucky run must not mask a bad one:
@@ -270,10 +285,11 @@ pramana/
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     ├── harness.py      # runs audit() over fixtures, counts true positives
-    └── baseline.py     # folds repeated runs into a baseline; gates later phases
+    ├── baseline.py     # folds repeated runs into a baseline; gates later phases
+    └── refutation.py   # puts hand-written claims to the verifier, bypassing the finder
 baselines/              # recorded baselines + the agent's audit reports
 baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
-tests/                  # 105 offline tests (parsing, grading, isolation, tool scope, corpus integrity, negative control)
+tests/                  # 124 offline tests (parsing, grading, isolation, tool scope, refutation probe, corpus integrity)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -283,7 +299,7 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 105 offline tests, no network/keys
+uv run pytest                      # 124 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```

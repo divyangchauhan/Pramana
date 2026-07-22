@@ -7,6 +7,8 @@ network, no API key. They lock down the provider-neutrality boundary (design
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from pramana import config
@@ -120,3 +122,81 @@ def test_build_adapter_knows_kimi_but_needs_a_key(monkeypatch):
 def test_build_adapter_rejects_unknown_provider():
     with pytest.raises(ValueError, match="unknown provider"):
         build_adapter("not-a-lab")
+
+
+# --- OpenAI-compatible gateways ----------------------------------------------
+#
+# Pointing OPENAI_BASE_URL at a gateway (OpenRouter, LiteLLM, vLLM, a local
+# proxy) is the supported way to reach non-OpenAI models through this adapter.
+# Such gateways commonly implement `models.list` but not per-model `retrieve`,
+# where a 404 means "unimplemented" rather than "no such model".
+
+
+class _FakeNotFound(Exception):
+    pass
+
+
+class _FakeStatusError(Exception):
+    pass
+
+
+class _FakeModel:
+    def __init__(self, mid: str) -> None:
+        self.id = mid
+
+
+class _FakeModels:
+    def __init__(self, *, retrieve_404: bool, listed: list[str] | None, list_500: bool = False):
+        self._retrieve_404 = retrieve_404
+        self._listed = listed or []
+        self._list_500 = list_500
+        self.retrieve_calls = 0
+
+    def retrieve(self, model: str):
+        self.retrieve_calls += 1
+        if self._retrieve_404:
+            raise _FakeNotFound("404")
+        return _FakeModel(model)
+
+    def list(self):
+        if self._list_500:
+            raise _FakeStatusError("500")
+        return [_FakeModel(m) for m in self._listed]
+
+
+def _adapter_with(models: _FakeModels) -> OpenAIAdapter:
+    adapter = OpenAIAdapter.__new__(OpenAIAdapter)  # bypass client construction
+    stub = cast(Any, adapter)  # the injected client/SDK are deliberately fakes
+    stub._openai = type(
+        "sdk", (), {"NotFoundError": _FakeNotFound, "APIStatusError": _FakeStatusError}
+    )
+    stub._client = type("client", (), {"models": models})()
+    return adapter
+
+
+def test_capability_check_accepts_a_model_the_gateway_only_lists():
+    """The proxy case: retrieve 404s, but the model is really there."""
+    models = _FakeModels(retrieve_404=True, listed=["gpt-5.5", "gpt-5.4"])
+    _adapter_with(models).check_capabilities("gpt-5.5")  # must not raise
+
+
+def test_capability_check_still_rejects_a_model_absent_from_the_list():
+    from pramana.providers.base import CapabilityError
+
+    models = _FakeModels(retrieve_404=True, listed=["gpt-5.5"])
+    with pytest.raises(CapabilityError, match="gpt-5.5"):  # error names what IS available
+        _adapter_with(models).check_capabilities("typo-model")
+
+
+def test_capability_check_short_circuits_when_retrieve_works():
+    models = _FakeModels(retrieve_404=False, listed=[])
+    _adapter_with(models).check_capabilities("gpt-5.5")
+    assert models.retrieve_calls == 1
+
+
+def test_capability_check_does_not_block_when_neither_endpoint_is_available():
+    """An endpoint that implements neither cannot be validated. Refusing to
+    start would make the adapter unusable against otherwise working servers;
+    the first real request surfaces the truth instead."""
+    models = _FakeModels(retrieve_404=True, listed=None, list_500=True)
+    _adapter_with(models).check_capabilities("whatever")  # must not raise

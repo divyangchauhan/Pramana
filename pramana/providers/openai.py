@@ -5,6 +5,11 @@ model-agnostic surface across GPT and reasoning ("o"/"gpt-5") models. No
 ``temperature`` is sent (reasoning models reject non-default sampling), and the
 output cap is passed as ``max_completion_tokens`` (the parameter reasoning
 models require). The rest of Pramana never learns which lab served a turn.
+
+Set ``OPENAI_BASE_URL`` to target any OpenAI-compatible endpoint — a gateway
+(OpenRouter, LiteLLM), a local server (vLLM, Ollama), or a proxy. The SDK reads
+that variable itself, so no wiring is needed here; what *is* needed is tolerating
+gateways that implement only part of the API (see ``check_capabilities``).
 """
 
 from __future__ import annotations
@@ -36,12 +41,35 @@ class OpenAIAdapter:
         self._client = openai.OpenAI()
 
     def check_capabilities(self, model: str) -> None:
+        """Fail fast on an unknown model id, before any fixture is run.
+
+        Tries ``models.retrieve`` first, then falls back to ``models.list``:
+        OpenAI-compatible gateways (LiteLLM, vLLM, OpenRouter, local proxies)
+        commonly serve the list endpoint but not per-model retrieve, and a 404
+        from retrieve there means "unimplemented", not "no such model".
+
+        If neither endpoint is usable the model is left unvalidated rather than
+        rejected — the first real request will surface the truth, and refusing
+        to start would make the adapter unusable against otherwise working
+        endpoints. Never falls back to a *different* model: that would make
+        results irreproducible.
+        """
         try:
             self._client.models.retrieve(model)
-        except self._openai.NotFoundError as exc:
-            raise CapabilityError(f"openai model {model!r} not found") from exc
+            return
+        except self._openai.NotFoundError:
+            pass  # may be an unimplemented endpoint; confirm against the list
         except self._openai.APIStatusError as exc:
             raise ProviderError(f"could not validate openai model {model!r}: {exc}") from exc
+
+        try:
+            available = [m.id for m in self._client.models.list()]
+        except self._openai.APIStatusError:
+            return  # endpoint unavailable — cannot validate, so do not block
+        if model not in available:
+            raise CapabilityError(
+                f"openai model {model!r} not found. Available: {', '.join(sorted(available))}"
+            )
 
     def complete(
         self,

@@ -60,8 +60,12 @@ class FixtureStat:
     def is_control(self) -> bool:
         return self.n_known_bugs == 0
 
-    def stable(self) -> bool:
-        return len(set(self.tp)) <= 1
+    def stable(self) -> bool | None:
+        """None when there is only one run: stability is not measurable from a
+        single observation, and reporting True would assert something unknown."""
+        if len(self.tp) < 2:
+            return None
+        return len(set(self.tp)) == 1
 
 
 def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
@@ -136,7 +140,10 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
         "negative_control_false_positives_per_run": control_fps,
         "negative_control_proven_false_positives_per_run": control_proven,
         "unmatched_confirmed_per_run": unmatched,
-        "fully_deterministic": all(s.stable() for s in stats.values()),
+        # None when a single run makes variance unmeasurable.
+        "fully_deterministic": (
+            all(s.stable() for s in stats.values()) if len(runs) > 1 else None
+        ),
         "fixtures": [
             {
                 "fixture": s.fixture,
@@ -151,6 +158,17 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
             for s in sorted(stats.values(), key=lambda s: s.fixture)
         ],
     }
+
+
+def _stability_line(b: dict[str, Any]) -> str:
+    if b["n_runs"] < 2:
+        return (
+            "**not measured** — a single run cannot separate a real result from "
+            "run-to-run variance"
+        )
+    if b["fully_deterministic"]:
+        return "identical results across all runs"
+    return "varies between runs — compare against the range, not a single number"
 
 
 def render_markdown(b: dict[str, Any], comparison: dict[str, Any] | None = None) -> str:
@@ -172,6 +190,12 @@ def render_markdown(b: dict[str, Any], comparison: dict[str, Any] | None = None)
         f"over **{b['n_runs']} independent runs** of `{', '.join(b['configs'])}`.",
         "",
     ]
+    if b["n_runs"] < 2:
+        lines += [
+            "> ⚠️ **Provisional — one run only.** Gating against this treats a single "
+            "observation as a floor. Record further runs before relying on it.",
+            "",
+        ]
     if b.get("working_tree_dirty"):
         lines += [
             "> ⚠️ Captured with uncommitted changes to tracked files — the recorded "
@@ -190,10 +214,8 @@ def render_markdown(b: dict[str, Any], comparison: dict[str, Any] | None = None)
         known = "0 *(control)*" if s["is_negative_control"] else str(s["n_known_bugs"])
         tp = ", ".join(str(v) for v in s["true_positives_per_run"])
         conf = ", ".join(str(v) for v in s["confirmed_per_run"])
-        lines.append(
-            f"| `{s['fixture']}` | {known} | {tp} | {conf} | "
-            f"{'✅' if s['stable_across_runs'] else '⚠️'} |"
-        )
+        stable = {True: "✅", False: "⚠️", None: "–"}[s["stable_across_runs"]]
+        lines.append(f"| `{s['fixture']}` | {known} | {tp} | {conf} | {stable} |")
 
     fps = b["negative_control_false_positives_per_run"]
     proven = b["negative_control_proven_false_positives_per_run"]
@@ -205,12 +227,7 @@ def render_markdown(b: dict[str, Any], comparison: dict[str, Any] | None = None)
         f"(mean {b['true_positives_mean']}) across {b['n_runs']} runs",
         f"- **Negative-control false positives:** {', '.join(str(v) for v in fps)} "
         f"confirmed per run; {', '.join(str(v) for v in proven)} with a passing PoC",
-        "- **Run-to-run stability:** "
-        + (
-            "identical results across all runs"
-            if b["fully_deterministic"]
-            else "varies between runs — compare against the range, not a single number"
-        ),
+        "- **Run-to-run stability:** " + _stability_line(b),
         "",
         "## Regression gate for later phases",
         "",

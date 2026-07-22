@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# Sensible per-provider defaults. `anthropic` is pinned to the current strong
-# reasoning model; the `openai` and `kimi` ids are placeholders you should
-# override with a concrete, currently-available model id via `--model` at run
-# time (e.g. the exact Moonshot Kimi K3 id for `kimi`).
+# Per-provider defaults, each verified to exist on that provider's endpoint and
+# to complete a full audit. Override per run with `--model`.
+#
+# `openai` resolves against whatever `OPENAI_BASE_URL` points at, so a gateway
+# serving a different catalogue needs an explicit `--model`; the capability
+# check lists what that endpoint actually serves.
 DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-opus-4-8",
-    "openai": "gpt-5.1",
+    "openai": "gpt-5.5",
     "kimi": "kimi-k3",
 }
 

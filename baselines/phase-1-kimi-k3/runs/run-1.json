@@ -1,0 +1,180 @@
+{
+  "true_positive_findings": 6,
+  "total_known_bugs": 6,
+  "corpus_fingerprint": "bee662ded628",
+  "negative_control_fixtures": [
+    "reentrancy-vault-patched"
+  ],
+  "negative_control_false_positives": 0,
+  "negative_control_proven_false_positives": 0,
+  "unmatched_confirmed_findings": 1,
+  "fixtures": [
+    {
+      "fixture": "bank-multi",
+      "config": "phase1/kimi:kimi-k3",
+      "n_candidates": 3,
+      "n_confirmed": 3,
+      "confirmed_poc_pass": 3,
+      "true_positive_findings": 2,
+      "n_known_bugs": 2,
+      "finder_precision": 0.6666666666666666,
+      "verifier_precision": 0.6666666666666666,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "reentrancy",
+          "normalized": "reentrancy",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true
+        },
+        {
+          "id": "F-002",
+          "vuln_class": "access-control",
+          "normalized": "access-control",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true
+        },
+        {
+          "id": "F-003",
+          "vuln_class": "missing-zero-check",
+          "normalized": "missing-zero-check",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": false
+        }
+      ]
+    },
+    {
+      "fixture": "reentrancy-vault",
+      "config": "phase1/kimi:kimi-k3",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "reentrancy",
+          "normalized": "reentrancy",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true
+        }
+      ]
+    },
+    {
+      "fixture": "reentrancy-vault-patched",
+      "config": "phase1/kimi:kimi-k3",
+      "n_candidates": 0,
+      "n_confirmed": 0,
+      "confirmed_poc_pass": 0,
+      "true_positive_findings": 0,
+      "n_known_bugs": 0,
+      "finder_precision": null,
+      "verifier_precision": null,
+      "recall": null,
+      "n_refuted": 0,
+      "error": null,
+      "details": []
+    },
+    {
+      "fixture": "tx-origin-wallet",
+      "config": "phase1/kimi:kimi-k3",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "tx-origin",
+          "normalized": "tx-origin",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true
+        }
+      ]
+    },
+    {
+      "fixture": "unchecked-overflow-token",
+      "config": "phase1/kimi:kimi-k3",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "integer-overflow",
+          "normalized": "integer-overflow",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true
+        }
+      ]
+    },
+    {
+      "fixture": "unprotected-owner",
+      "config": "phase1/kimi:kimi-k3",
+      "n_candidates": 2,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 0.5,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 1,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "access-control",
+          "normalized": "access-control",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true
+        },
+        {
+          "id": "F-002",
+          "vuln_class": "missing-zero-check",
+          "normalized": "missing-zero-check",
+          "verdict": "refuted",
+          "poc_ran": false,
+          "poc_passed": false,
+          "counted_true_positive": false
+        }
+      ]
+    }
+  ]
+}

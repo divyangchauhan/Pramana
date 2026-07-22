@@ -277,3 +277,25 @@ def test_markdown_records_provenance(tmp_path):
     assert "# Phase 0 baseline" in md
     assert b["commit_short"] in md
     assert "anthropic:claude-opus-4-8" in md
+
+
+def test_single_run_baseline_does_not_claim_stability(tmp_path):
+    """One observation cannot establish variance. Reporting "identical across
+    all runs" from n=1 would assert something unknown."""
+    b = aggregate([_run(tmp_path, "r1.json", [_row("a", 1, 1)])], "Phase 1")
+
+    assert b["fully_deterministic"] is None
+    assert b["fixtures"][0]["stable_across_runs"] is None
+
+    md = render_markdown(b)
+    assert "not measured" in md
+    assert "Provisional — one run only" in md
+    assert "identical results across all runs" not in md
+
+
+def test_two_identical_runs_do_claim_stability(tmp_path):
+    rows = [_row("a", 1, 1)]
+    b = aggregate([_run(tmp_path, "r1.json", rows), _run(tmp_path, "r2.json", rows)], "Phase 1")
+    assert b["fully_deterministic"] is True
+    assert b["fixtures"][0]["stable_across_runs"] is True
+    assert "identical results across all runs" in render_markdown(b)
