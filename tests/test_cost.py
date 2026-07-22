@@ -242,3 +242,37 @@ def test_no_gateway_entry_may_be_added_to_the_price_table():
     """A guard against a well-meaning future edit: per-token pricing for a
     gateway is not knowable from the model id alone."""
     assert not [k for k in PRICES if k.startswith("openai-gateway:")]
+
+
+def test_gateway_row_reports_a_notional_cost_beside_a_null_actual():
+    """Token counts are real even when the billing is a flat subscription, so
+    the run is comparable on efficiency — but the two numbers must never merge."""
+    rows = _usage_rows({"finder": ("openai-gateway:gpt-5.6-sol", Usage(input_tokens=1_000_000))})
+    assert rows["finder"]["usd"] is None, "notional money must not fill in actual spend"
+    assert rows["finder"]["usd_notional"] == pytest.approx(5.0)
+
+
+def test_first_party_row_has_no_notional_figure():
+    """Notional exists only where actual is unknowable; carrying both on a
+    priced row invites summing them."""
+    rows = _usage_rows({"finder": ("anthropic:claude-opus-4-8", Usage(input_tokens=1_000_000))})
+    assert rows["finder"]["usd"] == pytest.approx(5.0)
+    assert rows["finder"]["usd_notional"] is None
+
+
+def test_notional_total_is_separate_from_usd_total():
+    rows = [_row("a", _usage_rows(
+        {"finder": ("openai-gateway:gpt-5.5", Usage(input_tokens=2_000_000))}
+    ))]
+    summary = _cost_summary(rows)
+    assert summary["usd_total"] is None
+    assert summary["usd_notional_total"] == pytest.approx(10.0)
+
+
+def test_notional_uses_the_first_party_price_of_the_same_model():
+    """Not a flat guess: gpt-5.5 and kimi are priced differently, and the
+    notional figure must track whichever model actually ran."""
+    from pramana.cost import notional_key
+
+    assert notional_key("openai-gateway:gpt-5.5") == "openai:gpt-5.5"
+    assert notional_key("anthropic:claude-opus-4-8") is None

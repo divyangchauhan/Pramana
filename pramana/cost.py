@@ -103,8 +103,36 @@ PRICES: dict[str, Price] = {
 }
 
 
+# Gateway provider -> the first-party provider whose list price its models are
+# served under. Used only to compute a *notional* cost; never to fill in `usd`.
+NOTIONAL_EQUIVALENT: dict[str, str] = {"openai-gateway": "openai"}
+
+
 def model_key(provider: str, model: str) -> str:
     return f"{provider}:{model}"
+
+
+def notional_key(key: str) -> str | None:
+    """The first-party key whose list price corresponds to ``key``, if any."""
+    provider, _, model = key.partition(":")
+    equivalent = NOTIONAL_EQUIVALENT.get(provider)
+    return f"{equivalent}:{model}" if equivalent else None
+
+
+def estimate_usd_notional(key: str, usage: Usage) -> float | None:
+    """What ``usage`` *would* have cost at first-party list price.
+
+    For gateway runs only, and deliberately a separate field from ``usd``.
+    A subscription-replaying proxy bills a flat fee, so no money moved at these
+    rates — but the token counts are real, and pricing them makes a gateway row
+    comparable to a first-party one on efficiency.
+
+    Read it as "what this configuration would cost to run properly", never as
+    spend. ``usd`` stays ``None`` for these rows precisely so the two can never
+    be added together by accident.
+    """
+    equivalent = notional_key(key)
+    return estimate_usd(equivalent, usage) if equivalent else None
 
 
 def estimate_usd(key: str, usage: Usage) -> float | None:
