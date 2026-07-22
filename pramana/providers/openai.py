@@ -15,6 +15,7 @@ gateways that implement only part of the API (see ``check_capabilities``).
 from __future__ import annotations
 
 import json
+import sys
 from typing import Any
 
 from .base import (
@@ -25,6 +26,22 @@ from .base import (
     ToolCall,
     ToolSchema,
 )
+from .retry import RetryPolicy, call_with_retries
+
+
+def _log_retry(provider: str, model: str):
+    """Make a retry visible. A run that needed three attempts to get an answer
+    is not the same as one that got it first try, and silence would hide a
+    degrading endpoint until it failed outright."""
+
+    def _report(attempt: int, delay: float, exc: BaseException) -> None:
+        print(
+            f"  [{provider}:{model}] transient failure (attempt {attempt}), "
+            f"retrying in {delay:.1f}s: {str(exc)[:120]}",
+            file=sys.stderr,
+        )
+
+    return _report
 
 
 class OpenAIGatewayAdapter:
@@ -48,6 +65,13 @@ class OpenAIGatewayAdapter:
 
     provider = "openai-gateway"
 
+    # A gateway replaying an OAuth subscription goes unavailable in *bursts*
+    # while its token refreshes — observed lasting minutes, not seconds. The
+    # first-party default (4 attempts over ~10s) cannot bridge that, and a
+    # single unbridged burst discards the entire ten-fixture run. Patience here
+    # is cheaper than re-running.
+    RETRY_POLICY = RetryPolicy(attempts=7, base_delay=2.0, max_delay=90.0)
+
     def __new__(cls) -> Any:
         import os
 
@@ -59,11 +83,14 @@ class OpenAIGatewayAdapter:
             )
         adapter = OpenAIAdapter()
         adapter.provider = cls.provider  # identity differs; wire protocol does not
+        adapter.retry_policy = cls.RETRY_POLICY
         return adapter
 
 
 class OpenAIAdapter:
     provider = "openai"
+    # Overridden per-instance by the gateway, whose failures last longer.
+    retry_policy: RetryPolicy | None = None
     # OpenAI's newer output-cap parameter. OpenAI-compatible providers that only
     # accept the legacy `max_tokens` override this (see KimiAdapter).
     _token_param = "max_completion_tokens"
@@ -136,9 +163,13 @@ class OpenAIAdapter:
             kwargs["tool_choice"] = "auto"
 
         try:
-            resp = self._client.chat.completions.create(**kwargs)
+            resp = call_with_retries(
+                lambda: self._client.chat.completions.create(**kwargs),
+                policy=self.retry_policy,
+                on_retry=_log_retry(self.provider, model),
+            )
         except self._openai.APIError as exc:
-            raise ProviderError(f"openai request failed: {exc}") from exc
+            raise ProviderError(f"{self.provider} request failed: {exc}") from exc
 
         return self._from_wire(resp)
 

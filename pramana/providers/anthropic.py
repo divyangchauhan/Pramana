@@ -2,13 +2,20 @@
 
 Uses the Messages API via streaming (``messages.stream`` + ``get_final_message``)
 so large ``max_tokens`` values never trip the SDK's non-streaming timeout guard.
-No ``temperature`` (removed on Opus 4.8 — sending it 400s) and no ``thinking``
-config: keeping assistant turns to plain text + tool_use blocks avoids the
-thinking-block replay rules that tool loops would otherwise have to honor.
+No ``temperature`` (removed on Opus 4.8 — sending it 400s).
+
+``thinking: {type: "adaptive"}`` is sent on every request. It is not optional:
+Opus 4.8 does not think at all without it, and this file previously omitted it
+on the reasoning that avoiding thinking blocks kept the tool loop simple. That
+traded the model's reasoning for a simpler adapter, silently, on a
+vulnerability-discovery task. Assistant turns are still rebuilt as plain text +
+tool_use blocks; no thinking block is returned alongside ``tool_use``, so
+nothing is dropped in the replay.
 """
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from .base import (
@@ -19,6 +26,22 @@ from .base import (
     ToolCall,
     ToolSchema,
 )
+from .retry import call_with_retries
+
+
+def _log_retry(provider: str, model: str):
+    """Make a retry visible. A run that needed three attempts to get an answer
+    is not the same as one that got it first try, and silence would hide a
+    degrading endpoint until it failed outright."""
+
+    def _report(attempt: int, delay: float, exc: BaseException) -> None:
+        print(
+            f"  [{provider}:{model}] transient failure (attempt {attempt}), "
+            f"retrying in {delay:.1f}s: {str(exc)[:120]}",
+            file=sys.stderr,
+        )
+
+    return _report
 
 
 class AnthropicAdapter:
@@ -68,9 +91,12 @@ class AnthropicAdapter:
         if tools:
             kwargs["tools"] = tools
 
-        try:
+        def _send() -> Any:
             with self._client.messages.stream(**kwargs) as stream:
-                message = stream.get_final_message()
+                return stream.get_final_message()
+
+        try:
+            message = call_with_retries(_send, on_retry=_log_retry("anthropic", model))
         except self._anthropic.APIError as exc:
             raise ProviderError(f"anthropic request failed: {exc}") from exc
 
