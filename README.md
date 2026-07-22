@@ -47,12 +47,15 @@ That is the corpus proving itself, not the agent. It means a failure in a live r
 
 | Config | Corpus | True positives | Control FPs | Runs |
 |---|---|:---:|:---:|:---:|
+| **`phase1/anthropic:claude-opus-4-8`** | **current, 11 bugs** (`007869fd6cad`) | **10 / 11** | **0** | **3** |
 | `phase1/anthropic:claude-opus-4-8` | hint-free, 6 bugs | 6 / 6 | 0 | 1 |
 | `phase1/kimi:kimi-k3` | hint-free, 6 bugs | 6 / 6 | 0 | 1 |
 | `phase0/anthropic:claude-opus-4-8` | pre-strip, 6 bugs | 6 / 6 | 0 | 3 |
 | `phase1/anthropic:claude-opus-4-8` | pre-strip, 6 bugs | 6 / 6 | 0 | 3 |
 
-> **Read these honestly.** The corpus has since grown from 6 labeled bugs to 11 across 9 classes, so **no live measurement describes the current corpus yet** — every run above predates it. Runs and baselines record a `corpus_fingerprint` precisely so this cannot be glossed over: comparing across corpora reports *"not comparable"* rather than a verdict. Re-measurement is pending. See [`baselines/`](baselines/).
+> **Read these honestly.** Only the first row describes the current corpus; the rest predate it and are kept as history. Runs and baselines record a `corpus_fingerprint` precisely so this cannot be glossed over — comparing across corpora reports *"not comparable"* rather than a verdict. See [`baselines/`](baselines/).
+
+**Recall is no longer 100%, which is the point of having grown the corpus.** All three runs agree exactly, and the single miss is specific: `bank-multi` KB-3, the `sweep(address(0))` fund-burn. `claude-opus-4-8` never proposed it; `kimi-k3` found it. Six bugs across five classes could not tell two configurations apart — eleven across nine can.
 
 The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the pipeline reports nothing — the finder reads the ordering, sees the effect applied before the interaction, and proposes no candidate at all, so no verifier is ever invoked.
 
