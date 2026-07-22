@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..agents.loop import TraceFn
-from ..config import AgentConfig
+from ..config import SUPPORTED_PROVIDERS, AgentConfig
 from ..cost import PRICE_TABLE_VERSION, Usage, estimate_usd
 from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
@@ -476,7 +476,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pramana Phase 0 evaluation harness")
     parser.add_argument("--self-check", action="store_true",
                         help="grade reference PoCs only (no API key needed)")
-    parser.add_argument("--provider", choices=["anthropic", "openai", "kimi"],
+    # Derived, not duplicated: a hardcoded list silently omits any provider
+    # added later, and the CLI is the only way anyone reaches one.
+    parser.add_argument("--provider", choices=list(SUPPORTED_PROVIDERS),
                         help="LLM provider for a real agent run")
     parser.add_argument("--model", help="override the model id for the provider")
     parser.add_argument("--pipeline", choices=["phase0", "phase1"], default="phase1",

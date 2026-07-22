@@ -26,6 +26,10 @@ def build_adapter(provider: str) -> LLMAdapter:
         from .openai import OpenAIAdapter
 
         return OpenAIAdapter()
+    if provider == "openai-gateway":
+        from .openai import OpenAIGatewayAdapter
+
+        return OpenAIGatewayAdapter()
     if provider == "kimi":
         from .kimi import KimiAdapter
 

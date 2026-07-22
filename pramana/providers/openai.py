@@ -27,6 +27,41 @@ from .base import (
 )
 
 
+class OpenAIGatewayAdapter:
+    """The same wire protocol, deliberately a *different provider identity*.
+
+    An OpenAI-compatible gateway serves OpenAI model ids while billing on
+    entirely different terms — a proxy replaying a Codex subscription charges a
+    flat fee, not $5/$30 per million tokens. Reusing the ``openai`` identity
+    would price those runs off the first-party table and report dollars that
+    were never charged, quietly corrupting the one axis the cost accounting
+    exists to measure.
+
+    So gateway runs are keyed ``openai-gateway:<model>``, which is absent from
+    the price table and therefore reports ``usd: null`` — an honest gap rather
+    than a confident fiction. Quality metrics from a gateway row are fully
+    valid; only its cost is unknown.
+
+    Requires ``OPENAI_BASE_URL``: without it the SDK would silently talk to
+    first-party OpenAI while the run recorded itself as a gateway.
+    """
+
+    provider = "openai-gateway"
+
+    def __new__(cls) -> Any:
+        import os
+
+        if not os.environ.get("OPENAI_BASE_URL", "").strip():
+            raise ProviderError(
+                "provider 'openai-gateway' requires OPENAI_BASE_URL to point at "
+                "the gateway; without it the run would reach first-party OpenAI "
+                "while recording itself as a gateway run"
+            )
+        adapter = OpenAIAdapter()
+        adapter.provider = cls.provider  # identity differs; wire protocol does not
+        return adapter
+
+
 class OpenAIAdapter:
     provider = "openai"
     # OpenAI's newer output-cap parameter. OpenAI-compatible providers that only

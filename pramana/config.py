@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-opus-4-8",
     "openai": "gpt-5.5",
+    # Same wire protocol as `openai`, separate identity so gateway runs are not
+    # priced off the first-party table (see providers.openai.OpenAIGatewayAdapter).
+    # Requires OPENAI_BASE_URL.
+    "openai-gateway": "gpt-5.6-sol",
     "kimi": "kimi-k3",
 }
 

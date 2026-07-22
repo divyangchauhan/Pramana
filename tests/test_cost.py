@@ -223,3 +223,20 @@ def test_cost_summary_stamps_the_price_table_version():
     """A recorded dollar figure is meaningless without the table that produced it."""
     summary = _cost_summary([_row("a", _usage_rows({}))])
     assert summary["price_table_version"]
+
+
+# --- gateway rows must not borrow first-party prices -------------------------
+
+
+def test_gateway_key_is_unpriced_even_though_the_model_id_is_priced():
+    """A proxy replaying a subscription charges a flat fee, not per token. If
+    a gateway row borrowed the first-party price it would report dollars that
+    were never charged — worse than reporting nothing."""
+    assert estimate_usd("openai:gpt-5.6-sol", Usage(input_tokens=1_000_000)) == pytest.approx(5.0)
+    assert estimate_usd("openai-gateway:gpt-5.6-sol", Usage(input_tokens=1_000_000)) is None
+
+
+def test_no_gateway_entry_may_be_added_to_the_price_table():
+    """A guard against a well-meaning future edit: per-token pricing for a
+    gateway is not knowable from the model id alone."""
+    assert not [k for k in PRICES if k.startswith("openai-gateway:")]
