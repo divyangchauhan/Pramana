@@ -130,6 +130,7 @@ def audit_phase0(
             max_turns=config.max_turns,
             max_tokens=config.max_tokens,
             max_output_chars=ctx.max_output_chars,
+            effort=config.effort,
             trace=trace,
         )
         output = parse_phase0_output(run.text)
@@ -257,6 +258,7 @@ def verify_finding(
         max_turns=config.max_turns,
         max_tokens=config.max_tokens,
         max_output_chars=ctx.max_output_chars,
+        effort=config.effort,
         trace=_role_trace(trace, "verifier", finding.id),
     )
 
@@ -394,6 +396,7 @@ def audit_phase1(
             max_turns=config.max_turns,
             max_tokens=config.max_tokens,
             max_output_chars=ctx.max_output_chars,
+            effort=config.effort,
             trace=_role_trace(trace, "finder"),
         )
     except Exception as exc:

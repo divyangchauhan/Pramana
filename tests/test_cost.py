@@ -84,7 +84,9 @@ class _Adapter:
     def check_capabilities(self, model: str) -> None:
         return None
 
-    def complete(self, *, model, system, tools, messages, max_tokens) -> LLMResponse:
+    def complete(
+        self, *, model, system, tools, messages, max_tokens, effort=None
+    ) -> LLMResponse:
         self.calls += 1
         usage = {"input_tokens": 100, "output_tokens": 10}
         if self.calls <= self.turns:

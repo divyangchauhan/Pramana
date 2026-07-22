@@ -114,6 +114,7 @@ class OpenAIAdapter:
         tools: list[ToolSchema],
         messages: list[Message],
         max_tokens: int,
+        effort: str | None = None,
     ) -> LLMResponse:
         wire: list[dict[str, Any]] = [{"role": "system", "content": system}]
         for m in messages:
@@ -124,6 +125,12 @@ class OpenAIAdapter:
             "messages": wire,
             self._token_param: max_tokens,
         }
+        if effort:
+            # gpt-5.x and kimi-k3 both honour this — verified by measuring
+            # reasoning_tokens at low vs xhigh, not by the call merely not
+            # 400-ing. OpenAI-compatible endpoints ignore unknown parameters
+            # silently, which is exactly how the Anthropic thinking gap hid.
+            kwargs["reasoning_effort"] = effort
         if tools:
             kwargs["tools"] = [self._tool_to_wire(t) for t in tools]
             kwargs["tool_choice"] = "auto"

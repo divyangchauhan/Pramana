@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..agents.loop import TraceFn
-from ..config import SUPPORTED_PROVIDERS, AgentConfig
+from ..config import EFFORT_LEVELS, SUPPORTED_PROVIDERS, AgentConfig
 from ..cost import PRICE_TABLE_VERSION, Usage, estimate_usd
 from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
@@ -486,6 +486,11 @@ def main(argv: list[str] | None = None) -> int:
                              "verifier (default)")
     parser.add_argument("--finder-model", help="route the finder to a different model (phase1)")
     parser.add_argument("--verifier-model", help="route the verifier to a different model (phase1)")
+    parser.add_argument("--effort", choices=list(EFFORT_LEVELS),
+                        help="reasoning depth for every role. Leaving this unset is NOT "
+                             "neutral: provider defaults differ (anthropic high, openai "
+                             "gpt-5.x medium), so an unset effort compares models at "
+                             "different depths")
     parser.add_argument("--max-poc-attempts", type=int, default=4,
                         help="executed forge runs allowed per verification (phase1, default 4)")
     parser.add_argument("--fixtures", nargs="*", help="restrict to these fixture names")
@@ -542,6 +547,7 @@ def main(argv: list[str] | None = None) -> int:
             max_turns=args.max_turns,
             max_tokens=args.max_tokens,
             max_poc_attempts=args.max_poc_attempts,
+            effort=args.effort,
         )
         try:
             rows = run_agent_eval(

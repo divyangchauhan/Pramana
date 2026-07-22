@@ -32,7 +32,9 @@ class ScriptedVerifier:
     def check_capabilities(self, model: str) -> None:
         return None
 
-    def complete(self, *, model, system, tools, messages, max_tokens) -> LLMResponse:
+    def complete(
+        self, *, model, system, tools, messages, max_tokens, effort=None
+    ) -> LLMResponse:
         self.seeds.append(str(messages[0]["content"]))
         body = (
             '{"finding_id":"X","verdict":"confirmed","severity":"high",'

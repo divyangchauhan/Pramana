@@ -48,13 +48,23 @@ class AnthropicAdapter:
         tools: list[ToolSchema],
         messages: list[Message],
         max_tokens: int,
+        effort: str | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
             "system": system,
             "messages": [self._to_wire(m) for m in messages],
+            # REQUIRED for Opus 4.8 to think at all. Anthropic's docs are
+            # explicit: "Set thinking: {type: 'adaptive'} to enable thinking;
+            # without it, requests run without thinking." Omitting this ran
+            # every audit in this repo's history on a model that never reasoned
+            # before answering — while Fable 5, whose adaptive thinking cannot
+            # be disabled, would have reasoned. That is not a model comparison.
+            "thinking": {"type": "adaptive"},
         }
+        if effort:
+            kwargs["output_config"] = {"effort": effort}
         if tools:
             kwargs["tools"] = tools
 
