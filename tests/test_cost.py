@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from pramana.agents.loop import AgentRun, AgentTurnLimitError, run_agent
+from pramana.agents.loop import AgentRun, AgentTurnLimitError, run_agent, spent_on
 from pramana.cost import PRICES, Usage, estimate_usd, model_key, total_usd
 from pramana.eval.harness import FixtureRow, _cost_summary, _usage_rows
 from pramana.providers.base import LLMResponse, ToolCall
@@ -124,6 +124,40 @@ def test_turn_limit_error_carries_what_was_already_spent():
         _run(_Adapter(turns=99), max_turns=3)
     assert excinfo.value.usage.calls == 3
     assert excinfo.value.usage.input_tokens == 300
+
+
+def test_provider_failure_carries_what_earlier_turns_already_cost():
+    """The failure mode this exists for: credits run out mid-sweep, the fixture
+    errors, and every token it burned first vanishes from the run's cost."""
+
+    @dataclass
+    class _DiesOnThirdCall:
+        provider: str = "anthropic"
+        calls: int = 0
+
+        def check_capabilities(self, model: str) -> None:
+            return None
+
+        def complete(self, **_) -> LLMResponse:
+            self.calls += 1
+            if self.calls == 3:
+                raise RuntimeError("credit balance too low")
+            return LLMResponse(
+                text="",
+                tool_calls=[ToolCall(id="c", name="noop", arguments={})],
+                raw=None,
+                usage={"input_tokens": 100, "output_tokens": 10},
+            )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _run(_DiesOnThirdCall())
+    # The two turns that completed were billed; the one that raised was not.
+    spent = spent_on(excinfo.value)
+    assert (spent.input_tokens, spent.output_tokens, spent.calls) == (200, 20, 2)
+
+
+def test_spent_on_is_zero_for_an_exception_from_elsewhere():
+    assert spent_on(ValueError("unrelated")) == Usage()
 
 
 def test_adapter_omitting_usage_does_not_crash_the_loop():

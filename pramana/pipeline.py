@@ -22,7 +22,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from .agents.finder import FINDER_SYS, FINDER_TOOLS
-from .agents.loop import TraceFn, run_agent
+from .agents.loop import TraceFn, run_agent, spent_on
 from .agents.prompts import PHASE0_SYS, PHASE0_TOOLS
 from .agents.verifier import VERIFIER_SYS, VERIFIER_TOOLS, build_verifier_seed
 from .config import AgentConfig
@@ -49,6 +49,21 @@ VERIFIER_TOOL_NAMES = ("read_file", "write_file", "run_foundry_test")
 # Non-confirmed PoCs are moved here after each verification. They stay on disk
 # as evidence, but out of test/ — see _quarantine_unconfirmed.
 ATTEMPTS_DIR = "attempts"
+
+
+class PipelineError(RuntimeError):
+    """An audit that died partway, carrying what it had already spent.
+
+    The harness records a failed fixture as a row with an ``error``; without
+    this the tokens burned before the failure would vanish from the run's cost,
+    and a config that fails late and expensively would be recorded as the cheap
+    one. Wraps the original exception rather than replacing it — ``__cause__``
+    keeps the real traceback.
+    """
+
+    def __init__(self, message: str, usage: dict[str, tuple[str, Usage]]) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
 @dataclass
@@ -101,21 +116,27 @@ def audit_phase0(
     """Run one Phase 0 audit over ``contract_path`` (workspace-relative)."""
     slither_summary = _ground(ctx, contract_path)
     registry = build_tool_registry(ctx)
+    key = model_key(adapter.provider, config.agent.model)
 
-    run = run_agent(
-        adapter,
-        PHASE0_SYS,
-        PHASE0_TOOLS,
-        registry,
-        seed=_build_seed(contract_path, slither_summary),
-        model=config.agent.model,
-        max_turns=config.max_turns,
-        max_tokens=config.max_tokens,
-        max_output_chars=ctx.max_output_chars,
-        trace=trace,
-    )
+    try:
+        run = run_agent(
+            adapter,
+            PHASE0_SYS,
+            PHASE0_TOOLS,
+            registry,
+            seed=_build_seed(contract_path, slither_summary),
+            model=config.agent.model,
+            max_turns=config.max_turns,
+            max_tokens=config.max_tokens,
+            max_output_chars=ctx.max_output_chars,
+            trace=trace,
+        )
+        output = parse_phase0_output(run.text)
+    except Exception as exc:
+        raise PipelineError(
+            f"{type(exc).__name__}: {exc}", {"agent": (key, spent_on(exc))}
+        ) from exc
 
-    output = parse_phase0_output(run.text)
     return AuditResult(
         output=output,
         slither_summary=slither_summary,
@@ -124,7 +145,7 @@ def audit_phase0(
         n_confirmed=sum(f.verdict == "confirmed" for f in output.findings),
         n_inconclusive=sum(f.verdict == "inconclusive" for f in output.findings),
         n_refuted=sum(f.verdict == "refuted" for f in output.findings),
-        usage={"agent": (model_key(adapter.provider, config.agent.model), run.usage)},
+        usage={"agent": (key, run.usage)},
     )
 
 
@@ -323,35 +344,65 @@ def audit_phase1(
     """Finder -> verifier, with each verification context-isolated (design §10)."""
     slither_summary = _ground(ctx, contract_path)
 
-    # --- Agent 1: finder. Read-only: it cannot prove its own hypotheses. ---
     finder_profile = config.role("finder")
-    finder_run = run_agent(
-        adapters[finder_profile.provider],
-        FINDER_SYS,
-        FINDER_TOOLS,
-        build_tool_registry(ctx, FINDER_TOOL_NAMES),
-        seed=(
-            f"Target contract path: {contract_path}\n\n"
-            f"Slither output (leads to investigate, not findings):\n{slither_summary}\n\n"
-            "Review this contract and propose candidate findings as a JSON array."
-        ),
-        model=finder_profile.model,
-        max_turns=config.max_turns,
-        max_tokens=config.max_tokens,
-        max_output_chars=ctx.max_output_chars,
-        trace=_role_trace(trace, "finder"),
-    )
-    findings = parse_findings(finder_run.text)
+    verifier_profile = config.role("verifier")
+    finder_key = model_key(finder_profile.provider, finder_profile.model)
+    verifier_key = model_key(verifier_profile.provider, verifier_profile.model)
+    finder_usage = Usage()
+    verifier_usage = Usage()
+
+    def _died(exc: Exception, role: str) -> PipelineError:
+        """Attribute the partial spend to the role that was running."""
+        nonlocal finder_usage, verifier_usage
+        if role == "finder":
+            finder_usage += spent_on(exc)
+        else:
+            verifier_usage += spent_on(exc)
+        return PipelineError(
+            f"{type(exc).__name__}: {exc}",
+            {"finder": (finder_key, finder_usage), "verifier": (verifier_key, verifier_usage)},
+        )
+
+    # --- Agent 1: finder. Read-only: it cannot prove its own hypotheses. ---
+    try:
+        finder_run = run_agent(
+            adapters[finder_profile.provider],
+            FINDER_SYS,
+            FINDER_TOOLS,
+            build_tool_registry(ctx, FINDER_TOOL_NAMES),
+            seed=(
+                f"Target contract path: {contract_path}\n\n"
+                f"Slither output (leads to investigate, not findings):\n{slither_summary}\n\n"
+                "Review this contract and propose candidate findings as a JSON array."
+            ),
+            model=finder_profile.model,
+            max_turns=config.max_turns,
+            max_tokens=config.max_tokens,
+            max_output_chars=ctx.max_output_chars,
+            trace=_role_trace(trace, "finder"),
+        )
+    except Exception as exc:
+        raise _died(exc, "finder") from exc
+    finder_usage = finder_run.usage
+
+    try:
+        findings = parse_findings(finder_run.text)
+    except Exception as exc:
+        raise _died(exc, "finder") from exc
 
     # --- Agent 2: verifier, once per finding, each in a fresh context. ---
     by_id = {f.id: f for f in findings}
     verdicts: list[Verdict] = []
     attempts: dict[str, int] = {}
     confirmed_pocs: set[str] = set()
-    verifier_usage = Usage()
 
     for finding in findings:
-        verdict, used, used_usage = verify_finding(adapters, config, ctx, finding, trace=trace)
+        try:
+            verdict, used, used_usage = verify_finding(adapters, config, ctx, finding, trace=trace)
+        except Exception as exc:
+            # Verifications already completed stay counted — only the one that
+            # died contributes its partial spend.
+            raise _died(exc, "verifier") from exc
         verdicts.append(verdict)
         attempts[finding.id] = used
         verifier_usage += used_usage
@@ -380,7 +431,6 @@ def audit_phase1(
         findings=phase0_findings,
         report_markdown=_render_report(by_id, verdicts),
     )
-    verifier_profile = config.role("verifier")
     return AuditResult(
         output=output,
         slither_summary=slither_summary,
@@ -392,16 +442,7 @@ def audit_phase1(
         findings=findings,
         verdicts=verdicts,
         poc_attempts=attempts,
-        usage={
-            "finder": (
-                model_key(finder_profile.provider, finder_profile.model),
-                finder_run.usage,
-            ),
-            "verifier": (
-                model_key(verifier_profile.provider, verifier_profile.model),
-                verifier_usage,
-            ),
-        },
+        usage={"finder": (finder_key, finder_usage), "verifier": (verifier_key, verifier_usage)},
     )
 
 

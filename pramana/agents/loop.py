@@ -37,6 +37,17 @@ class AgentTurnLimitError(RuntimeError):
         self.usage = usage
 
 
+def spent_on(exc: BaseException) -> Usage:
+    """What ``exc`` had already burned before the run died, if it says.
+
+    Every exception leaving :func:`run_agent` carries this. A failure is not a
+    refund: the turns that completed were billed, and a config that dies late
+    and expensively must not be recorded as the cheap one.
+    """
+    usage = getattr(exc, "usage", None)
+    return usage if isinstance(usage, Usage) else Usage()
+
+
 def run_agent(
     llm: LLMAdapter,
     system_prompt: str,
@@ -56,13 +67,20 @@ def run_agent(
 
     for turn in range(max_turns):
         started = time.monotonic()
-        response = llm.complete(
-            model=model,
-            max_tokens=max_tokens,
-            system=system_prompt,
-            tools=tools,
-            messages=messages,
-        )
+        try:
+            response = llm.complete(
+                model=model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                tools=tools,
+                messages=messages,
+            )
+        except BaseException as exc:
+            # Every earlier turn was billed regardless of how this one ended.
+            # The failing call itself is not counted: a provider that raises
+            # generally did not charge for it, and we have no usage for it.
+            setattr(exc, "usage", usage)  # noqa: B010 - attach to arbitrary exc
+            raise
         usage += Usage(
             input_tokens=response.usage.get("input_tokens", 0),
             output_tokens=response.usage.get("output_tokens", 0),

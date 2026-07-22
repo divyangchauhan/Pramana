@@ -283,9 +283,11 @@ def run_agent_eval(
             else:
                 result = audit_phase1(adapters, config, ctx, fx.contract, trace=trace)
         except Exception as exc:  # keep the sweep going; record the failure
-            # A fixture that blew its turn limit still spent money. Charge it,
-            # or the config that fails expensively looks like the cheap one.
+            # A failure is not a refund. PipelineError carries the per-role
+            # spend up to the point it died, so a config that fails late and
+            # expensively is not recorded as the cheap one.
             spent = getattr(exc, "usage", None)
+            cause = exc.__cause__ or exc
             rows.append(
                 FixtureRow(
                     fixture=fx.name,
@@ -298,12 +300,8 @@ def run_agent_eval(
                     finder_precision=None,
                     verifier_precision=None,
                     recall=0.0 if fx.known_bugs else None,
-                    error=f"{type(exc).__name__}: {exc}",
-                    usage=(
-                        _usage_rows({"partial": (config.label(pipeline).split("/")[-1], spent)})
-                        if isinstance(spent, Usage)
-                        else {}
-                    ),
+                    error=f"{type(cause).__name__}: {cause}",
+                    usage=_usage_rows(spent) if isinstance(spent, dict) else {},
                 )
             )
             continue

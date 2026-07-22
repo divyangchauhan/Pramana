@@ -26,9 +26,11 @@ from pramana.contracts import (
     parse_findings,
     parse_verdict,
 )
+from pramana.cost import Usage
 from pramana.pipeline import (
     FINDER_TOOL_NAMES,
     VERIFIER_TOOL_NAMES,
+    PipelineError,
     _AttemptBudget,
     _quarantine_unconfirmed,
     _render_report,
@@ -398,6 +400,49 @@ def test_audit_phase1_records_the_model_each_role_actually_used(tmp_path, monkey
 
     assert result.usage["finder"][0] == "anthropic:finder-model"
     assert result.usage["verifier"][0] == "anthropic:verifier-model"
+
+
+def test_audit_phase1_bills_a_failed_run_to_the_role_that_died(tmp_path, monkeypatch):
+    """Credits running out mid-verification is the case this exists for: the
+    finder's completed work and the dead verification's partial spend must both
+    survive into the record, attributed to the right role."""
+    monkeypatch.setattr("pramana.pipeline._ground", lambda ctx, path: "(slither stub)")
+
+    @dataclass
+    class DyingAdapter:
+        provider: str = "anthropic"
+        calls: int = 0
+
+        def check_capabilities(self, model: str) -> None:
+            return None
+
+        def complete(self, *, model, system, tools, messages, max_tokens) -> LLMResponse:
+            self.calls += 1
+            if self.calls == 1:  # the finder succeeds
+                return LLMResponse(
+                    text=(
+                        '[{"id":"F-001","contract":"src/A.sol","location":"a()",'
+                        '"vuln_class":"reentrancy","hypothesis":"h"}]'
+                    ),
+                    tool_calls=[],
+                    raw=None,
+                    usage={"input_tokens": 500, "output_tokens": 50},
+                )
+            raise RuntimeError("credit balance too low")  # the verifier dies
+
+    ws = tmp_path / "ws"
+    (ws / "test").mkdir(parents=True)
+
+    with pytest.raises(PipelineError) as excinfo:
+        audit_phase1(
+            {"anthropic": DyingAdapter()}, _config(), ToolContext(workspace=ws), "src/A.sol"
+        )
+
+    usage = excinfo.value.usage
+    assert usage["finder"][1].input_tokens == 500, "finder's completed work was lost"
+    assert usage["verifier"][1] == Usage(), "verifier billed for a call that raised"
+    # The real error is preserved for the harness to report, not swallowed.
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
 
 
 def test_audit_phase1_runs_one_verifier_per_finding(tmp_path, monkeypatch):
