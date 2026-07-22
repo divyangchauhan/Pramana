@@ -144,7 +144,7 @@ def run_probes(
         ctx = ToolContext(
             workspace=ws, forge_timeout=forge_timeout, forge_retries=forge_retries
         )
-        verdict, attempts = verify_finding(adapters, config, ctx, case.claim, trace=None)
+        verdict, attempts, _ = verify_finding(adapters, config, ctx, case.claim, trace=None)
 
         # A confirmable claim must be confirmed; a false one must not be. An
         # "inconclusive" on a false claim is acceptable — the verifier failed to

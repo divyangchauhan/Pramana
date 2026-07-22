@@ -8,13 +8,33 @@ error results by ``dispatch`` rather than killing the run.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
+from ..cost import Usage
 from ..providers.base import LLMAdapter, Message, ToolSchema
 from ..tools.registry import dispatch
 
 TraceFn = Callable[[dict[str, Any]], None]
+
+
+@dataclass
+class AgentRun:
+    """What one agent produced, and what it cost to produce it."""
+
+    text: str
+    messages: list[Message] = field(default_factory=list)
+    usage: Usage = field(default_factory=Usage)
+
+
+class AgentTurnLimitError(RuntimeError):
+    """Raised when an agent exhausts ``max_turns``, carrying what it spent."""
+
+    def __init__(self, message: str, usage: Usage) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
 def run_agent(
@@ -29,17 +49,25 @@ def run_agent(
     max_tokens: int = 16_000,
     max_output_chars: int = 20_000,
     trace: TraceFn | None = None,
-) -> tuple[str, list[Message]]:
-    """Run one agent to completion. Returns (final_text, full_message_history)."""
+) -> AgentRun:
+    """Run one agent to completion."""
     messages: list[Message] = [{"role": "user", "content": seed}]
+    usage = Usage()
 
     for turn in range(max_turns):
+        started = time.monotonic()
         response = llm.complete(
             model=model,
             max_tokens=max_tokens,
             system=system_prompt,
             tools=tools,
             messages=messages,
+        )
+        usage += Usage(
+            input_tokens=response.usage.get("input_tokens", 0),
+            output_tokens=response.usage.get("output_tokens", 0),
+            calls=1,
+            elapsed_s=time.monotonic() - started,
         )
         messages.append(
             {
@@ -60,7 +88,7 @@ def run_agent(
             )
 
         if not response.tool_calls:
-            return response.text, messages  # agent is done
+            return AgentRun(response.text, messages, usage)  # agent is done
 
         results = [dispatch(call, tool_registry, max_output_chars) for call in response.tool_calls]
         messages.append({"role": "tool", "content": results})
@@ -77,4 +105,7 @@ def run_agent(
                     }
                 )
 
-    raise RuntimeError(f"agent exceeded max_turns ({max_turns})")
+    # Carries the usage burned before giving up: a run that hits the ceiling is
+    # the *most* expensive kind, and dropping its cost would flatter the config
+    # that caused it.
+    raise AgentTurnLimitError(f"agent exceeded max_turns ({max_turns})", usage)

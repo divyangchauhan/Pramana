@@ -37,6 +37,7 @@ from .contracts import (
     parse_phase0_output,
     parse_verdict,
 )
+from .cost import Usage, model_key
 from .providers.base import LLMAdapter, Message
 from .tools.files import ToolContext
 from .tools.registry import build_tool_registry
@@ -62,6 +63,10 @@ class AuditResult:
     findings: list[Finding] = field(default_factory=list)
     verdicts: list[Verdict] = field(default_factory=list)
     poc_attempts: dict[str, int] = field(default_factory=dict)
+    # role -> (provider:model, what that role spent). Keyed by role rather than
+    # summed, because "which slot is the money going to" is the question the
+    # Phase 2 routing sweep is asking (design §9).
+    usage: dict[str, tuple[str, Usage]] = field(default_factory=dict)
 
 
 # --- Phase 0: one combined agent ---------------------------------------------
@@ -97,7 +102,7 @@ def audit_phase0(
     slither_summary = _ground(ctx, contract_path)
     registry = build_tool_registry(ctx)
 
-    final_text, messages = run_agent(
+    run = run_agent(
         adapter,
         PHASE0_SYS,
         PHASE0_TOOLS,
@@ -110,15 +115,16 @@ def audit_phase0(
         trace=trace,
     )
 
-    output = parse_phase0_output(final_text)
+    output = parse_phase0_output(run.text)
     return AuditResult(
         output=output,
         slither_summary=slither_summary,
-        messages=messages,
+        messages=run.messages,
         n_candidates=len(output.findings),
         n_confirmed=sum(f.verdict == "confirmed" for f in output.findings),
         n_inconclusive=sum(f.verdict == "inconclusive" for f in output.findings),
         n_refuted=sum(f.verdict == "refuted" for f in output.findings),
+        usage={"agent": (model_key(adapter.provider, config.agent.model), run.usage)},
     )
 
 
@@ -201,8 +207,10 @@ def verify_finding(
     finding: Finding,
     *,
     trace: TraceFn | None,
-) -> tuple[Verdict, int]:
-    """Run one context-isolated verification. Returns (verdict, forge runs used).
+) -> tuple[Verdict, int, Usage]:
+    """Run one context-isolated verification.
+
+    Returns (verdict, forge runs used, model usage).
 
     Public so a single hand-written claim can be put to the verifier directly
     (see ``pramana.eval.refutation``) without going through the finder.
@@ -217,7 +225,7 @@ def verify_finding(
 
     seed = build_verifier_seed(bare_claim(finding), finding.id, config.max_poc_attempts)
 
-    final_text, _ = run_agent(
+    run = run_agent(
         adapters[profile.provider],
         VERIFIER_SYS,
         VERIFIER_TOOLS,
@@ -231,7 +239,7 @@ def verify_finding(
     )
 
     try:
-        verdict = parse_verdict(final_text)
+        verdict = parse_verdict(run.text)
     except OutputParseError as exc:
         # A verifier whose output we cannot read has not proven anything. Fail
         # closed to inconclusive rather than dropping the finding silently.
@@ -245,7 +253,7 @@ def verify_finding(
     if verdict.finding_id != finding.id:
         verdict = verdict.model_copy(update={"finding_id": finding.id})
     verdict = verdict.model_copy(update={"attempts": budget.used})
-    return verdict, budget.used
+    return verdict, budget.used, run.usage
 
 
 def _render_report(findings: dict[str, Finding], verdicts: list[Verdict]) -> str:
@@ -317,7 +325,7 @@ def audit_phase1(
 
     # --- Agent 1: finder. Read-only: it cannot prove its own hypotheses. ---
     finder_profile = config.role("finder")
-    finder_text, messages = run_agent(
+    finder_run = run_agent(
         adapters[finder_profile.provider],
         FINDER_SYS,
         FINDER_TOOLS,
@@ -333,18 +341,20 @@ def audit_phase1(
         max_output_chars=ctx.max_output_chars,
         trace=_role_trace(trace, "finder"),
     )
-    findings = parse_findings(finder_text)
+    findings = parse_findings(finder_run.text)
 
     # --- Agent 2: verifier, once per finding, each in a fresh context. ---
     by_id = {f.id: f for f in findings}
     verdicts: list[Verdict] = []
     attempts: dict[str, int] = {}
     confirmed_pocs: set[str] = set()
+    verifier_usage = Usage()
 
     for finding in findings:
-        verdict, used = verify_finding(adapters, config, ctx, finding, trace=trace)
+        verdict, used, used_usage = verify_finding(adapters, config, ctx, finding, trace=trace)
         verdicts.append(verdict)
         attempts[finding.id] = used
+        verifier_usage += used_usage
         if verdict.verdict == "confirmed" and verdict.poc_path:
             confirmed_pocs.add(verdict.poc_path)
         # Keep test/ compilable for the next verification.
@@ -370,10 +380,11 @@ def audit_phase1(
         findings=phase0_findings,
         report_markdown=_render_report(by_id, verdicts),
     )
+    verifier_profile = config.role("verifier")
     return AuditResult(
         output=output,
         slither_summary=slither_summary,
-        messages=messages,
+        messages=finder_run.messages,
         n_candidates=len(findings),
         n_confirmed=sum(v.verdict == "confirmed" for v in verdicts),
         n_inconclusive=sum(v.verdict == "inconclusive" for v in verdicts),
@@ -381,6 +392,16 @@ def audit_phase1(
         findings=findings,
         verdicts=verdicts,
         poc_attempts=attempts,
+        usage={
+            "finder": (
+                model_key(finder_profile.provider, finder_profile.model),
+                finder_run.usage,
+            ),
+            "verifier": (
+                model_key(verifier_profile.provider, verifier_profile.model),
+                verifier_usage,
+            ),
+        },
     )
 
 

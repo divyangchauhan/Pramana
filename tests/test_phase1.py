@@ -300,7 +300,12 @@ class ScriptedAdapter:
                 "messages": [m.get("content") for m in messages],
             }
         )
-        return LLMResponse(text=self.replies.pop(0), tool_calls=[], raw=None, usage={})
+        return LLMResponse(
+            text=self.replies.pop(0),
+            tool_calls=[],
+            raw=None,
+            usage={"input_tokens": 100, "output_tokens": 10},
+        )
 
 
 def _config() -> AgentConfig:
@@ -344,6 +349,55 @@ def test_audit_phase1_wires_finder_to_verifier_and_isolates_context(tmp_path, mo
     assert len(verifier_call["messages"]) == 1
     assert "SECRET_FINDER_REASONING" not in str(verifier_call["messages"])
     assert "SECRET_FINDER_REASONING" not in verifier_call["system"]
+
+
+def test_audit_phase1_attributes_cost_to_the_role_that_spent_it(tmp_path, monkeypatch):
+    """Per-role, not summed: "which slot is the money going to" is the question
+    the routing sweep asks, and one total cannot answer it."""
+    monkeypatch.setattr("pramana.pipeline._ground", lambda ctx, path: "(slither stub)")
+
+    finder_reply = (
+        '[{"id":"F-001","contract":"src/A.sol","location":"a()",'
+        '"vuln_class":"reentrancy","hypothesis":"h"},'
+        '{"id":"F-002","contract":"src/A.sol","location":"b()",'
+        '"vuln_class":"access-control","hypothesis":"h2"}]'
+    )
+    verdict = '{"finding_id":"%s","verdict":"refuted","evidence":"no"}'
+    adapter = ScriptedAdapter(replies=[finder_reply, verdict % "F-001", verdict % "F-002"])
+    ws = tmp_path / "ws"
+    (ws / "test").mkdir(parents=True)
+
+    result = audit_phase1(
+        {"anthropic": adapter}, _config(), ToolContext(workspace=ws), "src/A.sol"
+    )
+
+    assert set(result.usage) == {"finder", "verifier"}
+    _, finder_usage = result.usage["finder"]
+    _, verifier_usage = result.usage["verifier"]
+    # One finder call; one verifier call per finding, summed across both.
+    assert finder_usage.calls == 1
+    assert verifier_usage.calls == 2
+    assert verifier_usage.input_tokens == 200
+
+
+def test_audit_phase1_records_the_model_each_role_actually_used(tmp_path, monkeypatch):
+    """Cost is meaningless without knowing which model produced it — and the
+    two roles can be routed to different ones."""
+    monkeypatch.setattr("pramana.pipeline._ground", lambda ctx, path: "(slither stub)")
+
+    config = AgentConfig(
+        agent=ModelProfile(provider="anthropic", model="m"),
+        finder=ModelProfile(provider="anthropic", model="finder-model"),
+        verifier=ModelProfile(provider="anthropic", model="verifier-model"),
+    )
+    adapter = ScriptedAdapter(replies=["[]"])
+    ws = tmp_path / "ws"
+    (ws / "test").mkdir(parents=True)
+
+    result = audit_phase1({"anthropic": adapter}, config, ToolContext(workspace=ws), "src/A.sol")
+
+    assert result.usage["finder"][0] == "anthropic:finder-model"
+    assert result.usage["verifier"][0] == "anthropic:verifier-model"
 
 
 def test_audit_phase1_runs_one_verifier_per_finding(tmp_path, monkeypatch):
