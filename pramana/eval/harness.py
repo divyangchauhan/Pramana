@@ -24,6 +24,7 @@ from pathlib import Path
 
 from ..agents.loop import TraceFn
 from ..config import AgentConfig
+from ..cost import PRICE_TABLE_VERSION, Usage, estimate_usd
 from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
 from ..tools.files import ToolContext, ToolError
@@ -95,6 +96,9 @@ class FixtureRow:
     error: str | None = None
     report_markdown: str = ""
     details: list[dict] = field(default_factory=list)
+    # role -> {model, input_tokens, output_tokens, calls, elapsed_s, usd}.
+    # ``usd`` is None for a model absent from the pinned price table.
+    usage: dict[str, dict] = field(default_factory=dict)
 
 
 def _verify_poc(
@@ -225,6 +229,15 @@ def run_self_check(
     return rows
 
 
+def _usage_rows(usage: dict[str, tuple[str, Usage]]) -> dict[str, dict]:
+    """Flatten per-role usage and price it under the pinned table."""
+    rows: dict[str, dict] = {}
+    for role, (key, u) in usage.items():
+        usd = estimate_usd(key, u)
+        rows[role] = {"model": key, **u.as_dict(), "usd": None if usd is None else round(usd, 6)}
+    return rows
+
+
 def run_agent_eval(
     fixtures: list[Fixture],
     config: AgentConfig,
@@ -270,6 +283,11 @@ def run_agent_eval(
             else:
                 result = audit_phase1(adapters, config, ctx, fx.contract, trace=trace)
         except Exception as exc:  # keep the sweep going; record the failure
+            # A failure is not a refund. PipelineError carries the per-role
+            # spend up to the point it died, so a config that fails late and
+            # expensively is not recorded as the cheap one.
+            spent = getattr(exc, "usage", None)
+            cause = exc.__cause__ or exc
             rows.append(
                 FixtureRow(
                     fixture=fx.name,
@@ -282,7 +300,8 @@ def run_agent_eval(
                     finder_precision=None,
                     verifier_precision=None,
                     recall=0.0 if fx.known_bugs else None,
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=f"{type(cause).__name__}: {cause}",
+                    usage=_usage_rows(spent) if isinstance(spent, dict) else {},
                 )
             )
             continue
@@ -297,6 +316,7 @@ def run_agent_eval(
         )
         row.report_markdown = result.output.report_markdown
         row.n_refuted = result.n_refuted
+        row.usage = _usage_rows(result.usage)
         rows.append(row)
     return rows
 
@@ -328,11 +348,53 @@ def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> 
         "unmatched_confirmed_findings": sum(
             r.n_confirmed - r.true_positive_findings for r in rows if r.n_known_bugs
         ),
+        # What the run cost, per role, summed over fixtures. Recorded next to
+        # precision/recall so a routing change is judged on what it bought and
+        # not only on what it saved (design §9).
+        "cost": _cost_summary(rows),
         # `report_markdown` is deliberately excluded: reports are written as
         # standalone files by --report-dir, and inlining them bloats the JSON.
         "fixtures": [
             {k: v for k, v in r.__dict__.items() if k != "report_markdown"} for r in rows
         ],
+    }
+
+
+def _cost_summary(rows: list[FixtureRow]) -> dict:
+    """Roll per-fixture usage up to per-role totals for the run."""
+    by_role: dict[str, dict] = {}
+    for row in rows:
+        for role, entry in row.usage.items():
+            acc = by_role.setdefault(
+                role,
+                {
+                    "model": entry["model"],
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "calls": 0,
+                    "elapsed_s": 0.0,
+                    "usd": 0.0,
+                },
+            )
+            for field_name in ("input_tokens", "output_tokens", "calls", "elapsed_s"):
+                acc[field_name] += entry[field_name]
+            # One unpriced model poisons the role total rather than silently
+            # dropping out of it — an understated cost picks a false winner.
+            if acc["usd"] is not None and entry["usd"] is not None:
+                acc["usd"] += entry["usd"]
+            else:
+                acc["usd"] = None
+    for acc in by_role.values():
+        acc["elapsed_s"] = round(acc["elapsed_s"], 3)
+        if acc["usd"] is not None:
+            acc["usd"] = round(acc["usd"], 6)
+    totals = [a["usd"] for a in by_role.values()]
+    return {
+        "price_table_version": PRICE_TABLE_VERSION,
+        "by_role": by_role,
+        "usd_total": (
+            None if any(t is None for t in totals) else round(sum(t for t in totals), 6)
+        ),
     }
 
 
@@ -375,6 +437,19 @@ def print_report(rows: list[FixtureRow]) -> None:
         proven = sum(r.confirmed_poc_pass for r in controls)
         print(f"NEGATIVE CONTROLS ({len(controls)}) — false positives: {fp} "
               f"confirmed, {proven} with a passing PoC")
+
+    cost = _cost_summary(rows)
+    if cost["by_role"]:
+        print(f"\nCOST (price table {cost['price_table_version']})")
+        for role, acc in sorted(cost["by_role"].items()):
+            usd = "unpriced" if acc["usd"] is None else f"${acc['usd']:.4f}"
+            print(f"  {role:<9} {acc['model']:<28} "
+                  f"in {acc['input_tokens']:>8,}  out {acc['output_tokens']:>7,}  "
+                  f"{acc['calls']:>3} calls  {acc['elapsed_s']:>7.1f}s  {usd:>10}")
+        total = cost["usd_total"]
+        print(f"  {'TOTAL':<9} {'':<28} "
+              f"{'':>12}  {'':>11}  {'':>9}  {'':>8}  "
+              f"{('unpriced' if total is None else f'${total:.4f}'):>10}")
     print()
 
 

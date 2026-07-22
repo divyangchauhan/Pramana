@@ -55,6 +55,26 @@ That is the corpus proving itself, not the agent. It means a failure in a live r
 
 > **Read these honestly.** Only the first row describes the current corpus; the rest predate it and are kept as history. Runs and baselines record a `corpus_fingerprint` precisely so this cannot be glossed over — comparing across corpora reports *"not comparable"* rather than a verdict. See [`baselines/`](baselines/).
 
+### What a run costs
+
+Every run records tokens, model latency and money **per role**, priced from a
+dated, versioned table (`pramana/cost.py`). A model missing from that table
+reports `null`, never `$0` — an unpriced model costing nothing would win every
+cost comparison it entered.
+
+```
+COST (price table 2026-07-22)
+  finder    anthropic:claude-opus-4-8    in    8,568  out     553    3 calls     12.4s     $0.0567
+  verifier  anthropic:claude-opus-4-8    in   11,100  out   1,038    4 calls     21.8s     $0.0814
+  TOTAL                                                                                     $0.1381
+```
+
+Per role, because "which slot is the money going to" is the question routing
+has to answer — and the first measurement already contradicts the usual guess
+that the finder is the expensive one. **The verifier costs more** (59% of the
+bill here): it writes code, runs it, reads failures and retries, while the
+finder reads and proposes once.
+
 **Recall is no longer 100%, which is the point of having grown the corpus.** All three runs agree exactly, and the single miss is specific: `bank-multi` KB-3, the `sweep(address(0))` fund-burn. `claude-opus-4-8` never proposed it; `kimi-k3` found it. Six bugs across five classes could not tell two configurations apart — eleven across nine can.
 
 The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the pipeline reports nothing — the finder reads the ordering, sees the effect applied before the interaction, and proposes no candidate at all, so no verifier is ever invoked.
