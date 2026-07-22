@@ -32,18 +32,27 @@ That single design choice — *executable proof over model confidence* — is th
 
 The headline metric is **true-positive findings confirmed with an executable PoC** — a finding the harness *independently re-runs and watches pass* in a clean workspace, matched to a known real vulnerability.
 
-Full corpus, live with `claude-opus-4-8` on the two-agent pipeline, **repeated 3× — identical every run**:
+### The corpus is real, and provable without an API key
 
-| Fixture | Vulnerability class(es) | Known bugs | Proven with PoC | True positives |
+Every one of the 11 labeled bugs ships with a reference exploit the harness executes in a pristine workspace. `--self-check` runs the entire scoring pipeline — workspace build → `forge test` → class match → count — with **no key and no network**:
+
+```
+HEADLINE — true-positive findings confirmed with executable PoCs: 11 / 11 known bugs
+NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
+```
+
+That is the corpus proving itself, not the agent. It means a failure in a live run is the pipeline's, never a broken fixture.
+
+### Live agent runs
+
+| Config | Corpus | True positives | Control FPs | Runs |
 |---|---|:---:|:---:|:---:|
-| `reentrancy-vault` | reentrancy | 1 | ✅ | 1 |
-| `unprotected-owner` | access-control | 1 | ✅ | 1 |
-| `tx-origin-wallet` | tx-origin | 1 | ✅ | 1 |
-| `unchecked-overflow-token` | integer-overflow | 1 | ✅ | 1 |
-| `bank-multi` | reentrancy **+** access-control | 2 | ✅ ✅ | 2 |
-| `reentrancy-vault-patched` | *none — negative control* | 0 | — | 0 **(0 false positives)** |
+| `phase1/anthropic:claude-opus-4-8` | hint-free, 6 bugs | 6 / 6 | 0 | 1 |
+| `phase1/kimi:kimi-k3` | hint-free, 6 bugs | 6 / 6 | 0 | 1 |
+| `phase0/anthropic:claude-opus-4-8` | pre-strip, 6 bugs | 6 / 6 | 0 | 3 |
+| `phase1/anthropic:claude-opus-4-8` | pre-strip, 6 bugs | 6 / 6 | 0 | 3 |
 
-**6 / 6 true positives · recall 1.00 · precision 1.00 · 0 false positives on the negative control.** Every finding came with a Foundry exploit that the harness re-ran, from scratch, against the untouched target contract — including the composite `bank-multi`, where both distinct bugs were found and proven independently.
+> **Read these honestly.** The corpus has since grown from 6 labeled bugs to 11 across 9 classes, so **no live measurement describes the current corpus yet** — every run above predates it. Runs and baselines record a `corpus_fingerprint` precisely so this cannot be glossed over: comparing across corpora reports *"not comparable"* rather than a verdict. Re-measurement is pending. See [`baselines/`](baselines/).
 
 The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the pipeline reports nothing — the finder reads the ordering, sees the effect applied before the interaction, and proposes no candidate at all, so no verifier is ever invoked.
 
@@ -54,9 +63,7 @@ The single-agent Phase 0 run reached the same verdict by a more legible route: i
 
 Either way it is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported. Worth noting honestly: the split makes the *clean-contract* report thinner, since a claim filtered out at the proposal stage leaves no record of what was checked. That is a deliverable-quality gap no current metric captures, and a job for the Phase 2 reporter.
 
-> **Measurement caveat.** These three runs predate a corpus change. Every fixture's source comments used to explain its own bug (`BUG: tx.origin authentication is phishable`), which the agent reads — so they partly measured reading comprehension. Those comments have been [removed](baselines/#the-corpus-changed); the contracts are otherwise untouched and all six reference exploits still pass. Re-measurement on the hint-free corpus stopped after one clean run when API credits ran out: it held **6 / 6 with 0 false positives**, but one run is not a baseline. See [`baselines/`](baselines/).
-
-📊 **[Full baseline record →](baselines/phase-1/)** — all 3 runs, per-fixture stability, pinned commit and config, and the regression check against [Phase 0](baselines/phase-0/). The agent's own audit reports for every fixture are committed alongside it.
+📊 **[Baseline records →](baselines/)** — every run, per-fixture stability, pinned commit, config and corpus, plus the agent's own audit reports.
 
 An offline `--self-check` reproduces the entire scoring pipeline (workspace build → `forge test` → class match → count) with **no API key required**.
 
@@ -161,15 +168,19 @@ Three ideas do the heavy lifting — each is a deliberate engineering choice, no
 
 ## The corpus
 
-Five self-contained fixtures, each modeled on a landmark real-world exploit, with a labeled known-bug set and a reference PoC:
+Nine self-contained vulnerable fixtures spanning nine vulnerability classes, each with a labeled known-bug set and a reference exploit that the harness re-runs offline:
 
-| Fixture | Class | Modeled on |
+| Fixture | Class(es) | Modeled on |
 |---|---|---|
 | `reentrancy-vault` | reentrancy | The DAO (2016) |
 | `unprotected-owner` | access-control | Parity multisig unprotected initializer (2017) |
-| `tx-origin-wallet` | tx-origin (SWC-115) | `tx.origin` phishing |
+| `tx-origin-wallet` | tx-origin | SWC-115 `tx.origin` phishing |
 | `unchecked-overflow-token` | integer-overflow | BeautyChain (BEC) `batchOverflow` (2018) |
-| `bank-multi` | reentrancy **+** access-control | composite two-bug contract — exercises 1:1 matching |
+| `unchecked-send-payouts` | unchecked-call | SWC-104 — King of the Ether (2016) |
+| `delegatecall-module` | delegatecall | SWC-112 — Parity multisig library kill (2017) |
+| `weak-randomness-lottery` | weak-randomness | SWC-120 — chain-attribute RNG |
+| `signature-replay-vault` | signature-replay | SWC-121 — missing nonce |
+| `bank-multi` | reentrancy **+** access-control **+** missing-zero-check | composite three-bug contract — exercises 1:1 matching |
 
 Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline.
 
@@ -199,16 +210,22 @@ uv run python -m pramana.eval.harness --self-check
 ```
 
 ```
+=== Pramana eval ===
 fixture                    cfg                    cand  ref conf  poc+  TP  recall
 ----------------------------------------------------------------------------------
-bank-multi                 reference-poc             2    0    2     2   2    1.00
+bank-multi                 reference-poc             3    0    3     3   3    1.00
+delegatecall-module        reference-poc             1    0    1     1   1    1.00
 reentrancy-vault           reference-poc             1    0    1     1   1    1.00
 reentrancy-vault-patched   reference-poc             0    0    0     0   0       -
+signature-replay-vault     reference-poc             1    0    1     1   1    1.00
 tx-origin-wallet           reference-poc             1    0    1     1   1    1.00
 unchecked-overflow-token   reference-poc             1    0    1     1   1    1.00
+unchecked-send-payouts     reference-poc             1    0    1     1   1    1.00
 unprotected-owner          reference-poc             1    0    1     1   1    1.00
+weak-randomness-lottery    reference-poc             1    0    1     1   1    1.00
 ----------------------------------------------------------------------------------
-HEADLINE — true-positive findings confirmed with executable PoCs: 6 / 6 known bugs
+
+HEADLINE — true-positive findings confirmed with executable PoCs: 11 / 11 known bugs
 NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
 ```
 
@@ -281,7 +298,7 @@ pramana/
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
 └── eval/
-    ├── datasets/       # the real-world corpus (5 vulnerable fixtures / 6 known bugs + 1 negative control)
+    ├── datasets/       # the corpus (9 vulnerable fixtures / 11 known bugs / 9 classes + 1 negative control)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     ├── harness.py      # runs audit() over fixtures, counts true positives
@@ -289,7 +306,7 @@ pramana/
     └── refutation.py   # puts hand-written claims to the verifier, bypassing the finder
 baselines/              # recorded baselines + the agent's audit reports
 baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
-tests/                  # 124 offline tests (parsing, grading, isolation, tool scope, refutation probe, corpus integrity)
+tests/                  # 131 offline tests (parsing, grading, isolation, tool scope, refutation probe, corpus integrity)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -299,7 +316,7 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 124 offline tests, no network/keys
+uv run pytest                      # 131 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```

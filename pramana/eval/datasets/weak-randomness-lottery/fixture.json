@@ -1,0 +1,14 @@
+{
+  "name": "weak-randomness-lottery",
+  "contract": "src/Lottery.sol",
+  "reference_poc": "reference/PredictableDrawExploit.t.sol",
+  "inspiration": "SWC-120 weak sources of randomness from chain attributes",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "weak-randomness",
+      "location": "Lottery.enter()",
+      "description": "The draw derives from block.timestamp, block.prevrandao and msg.sender — all readable inside the same transaction — so a contract can compute the result before committing funds and enter only when it wins."
+    }
+  ]
+}

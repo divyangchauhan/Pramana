@@ -1,0 +1,14 @@
+{
+  "name": "delegatecall-module",
+  "contract": "src/ModularVault.sol",
+  "reference_poc": "reference/DelegatecallTakeoverExploit.t.sol",
+  "inspiration": "SWC-112 delegatecall to untrusted callee (Parity multisig, 2017)",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "delegatecall",
+      "location": "ModularVault.execute()",
+      "description": "execute() delegatecalls an arbitrary caller-supplied address with no authorization or allowlist, so any account can run code against the vault's storage, overwrite `owner` and withdraw the balance."
+    }
+  ]
+}

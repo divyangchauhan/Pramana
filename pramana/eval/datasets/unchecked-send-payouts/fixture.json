@@ -1,0 +1,14 @@
+{
+  "name": "unchecked-send-payouts",
+  "contract": "src/Payouts.sol",
+  "reference_poc": "reference/UncheckedSendExploit.t.sol",
+  "inspiration": "SWC-104 unchecked call return value (King of the Ether, 2016)",
+  "known_bugs": [
+    {
+      "id": "KB-1",
+      "vuln_class": "unchecked-call",
+      "location": "Payouts.payout()",
+      "description": "The return value of `send` is discarded. A recipient that cannot accept ETH causes the transfer to fail silently after the claim has already been zeroed, stranding the funds and destroying the recipient's entitlement."
+    }
+  ]
+}

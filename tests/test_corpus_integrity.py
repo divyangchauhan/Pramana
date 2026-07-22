@@ -105,3 +105,38 @@ def _fixture_source(name: str) -> str:
     sources = sorted(fixture.src_dir.glob("*.sol"))
     assert len(sources) == 1
     return sources[0].read_text()
+
+
+def test_every_fixture_has_a_reference_poc_for_each_known_bug():
+    """A labeled bug with no executable proof cannot be graded, and would
+    silently depress every recall number that includes it."""
+    for fixture in load_fixtures():
+        for bug in fixture.known_bugs:
+            rel = bug.reference_poc or fixture.reference_poc
+            assert rel, f"{fixture.name}/{bug.id} has no reference PoC"
+            assert (fixture.dir / rel).is_file(), f"{fixture.name}/{bug.id}: missing {rel}"
+
+
+def test_known_bug_classes_normalize_to_themselves():
+    """A vuln_class the harness cannot canonicalize can never match a finding,
+    making the bug unfindable however good the agent is."""
+    from pramana.eval.harness import normalize_vuln_class
+
+    for fixture in load_fixtures():
+        for bug in fixture.known_bugs:
+            assert normalize_vuln_class(bug.vuln_class) == bug.vuln_class, (
+                f"{fixture.name}/{bug.id}: {bug.vuln_class!r} normalizes to "
+                f"{normalize_vuln_class(bug.vuln_class)!r} — label it canonically"
+            )
+
+
+def test_reference_poc_names_avoid_the_testfail_prefix():
+    """Foundry reads a `testFail` prefix as 'expected to revert', which silently
+    inverts a reference exploit's result."""
+    import re
+
+    for path in DATASETS_DIR.glob("*/reference/*.sol"):
+        for name in re.findall(r"function\s+(\w+)\s*\(", path.read_text()):
+            assert not name.startswith("testFail"), (
+                f"{path.name}: {name}() uses the testFail prefix; Foundry inverts it"
+            )
