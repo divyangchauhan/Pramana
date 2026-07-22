@@ -17,6 +17,13 @@ from pydantic import BaseModel, Field, ValidationError
 VerdictLabel = Literal["confirmed", "inconclusive", "refuted"]
 Severity = Literal["critical", "high", "medium", "low", "informational"]
 
+# Severity ordering, worst first. Used to enforce the deployment-contingent cap.
+SEVERITY_ORDER: tuple[Severity, ...] = ("critical", "high", "medium", "low", "informational")
+
+# A finding that only bites when the contract is deployed or configured badly
+# cannot outrank one an attacker can trigger against the contract as specified.
+DEPLOYMENT_CONTINGENT_MAX: Severity = "medium"
+
 
 class Finding(BaseModel):
     """Finder → verifier. The verifier is seeded with only the bare-claim fields."""
@@ -39,6 +46,25 @@ class Verdict(BaseModel):
     poc_path: str | None = None
     evidence: str | None = None
     attempts: int = 0
+    # True when the PoC had to deploy or configure the contract badly to make
+    # the exploit reachable — the vault constructed with signer=address(0), the
+    # admin passing address(0). A real finding, but not one an attacker can
+    # reach on a correctly deployed instance.
+    deployment_contingent: bool = False
+
+    def capped(self) -> Verdict:
+        """Apply the deployment-contingent severity ceiling.
+
+        Enforced here rather than trusted to the prompt: a verifier that
+        forgets the rule, or is routed to a model that reads it differently,
+        would otherwise let a misconfiguration finding outrank a real exploit
+        and distort every config comparison that counts severity.
+        """
+        if not self.deployment_contingent or self.severity is None:
+            return self
+        if SEVERITY_ORDER.index(self.severity) >= SEVERITY_ORDER.index(DEPLOYMENT_CONTINGENT_MAX):
+            return self
+        return self.model_copy(update={"severity": DEPLOYMENT_CONTINGENT_MAX})
 
 
 class Phase0Finding(BaseModel):
@@ -53,6 +79,7 @@ class Phase0Finding(BaseModel):
     verdict: VerdictLabel
     poc_path: str | None = None
     evidence: str | None = None
+    deployment_contingent: bool = False
 
 
 class Phase0Output(BaseModel):

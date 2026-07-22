@@ -402,6 +402,39 @@ def test_audit_phase1_records_the_model_each_role_actually_used(tmp_path, monkey
     assert result.usage["verifier"][0] == "anthropic:verifier-model"
 
 
+def test_audit_phase1_caps_a_deployment_contingent_verdict(tmp_path, monkeypatch):
+    """The unit tests cover Verdict.capped(); this pins that the pipeline
+    actually calls it. Without this, deleting that line leaves every other test
+    green while uncapped severities reach the report."""
+    monkeypatch.setattr("pramana.pipeline._ground", lambda ctx, path: "(slither stub)")
+
+    finder_reply = (
+        '[{"id":"F-001","contract":"src/A.sol","location":"a()",'
+        '"vuln_class":"access-control","hypothesis":"h"}]'
+    )
+    # The verifier claims critical while admitting it had to deploy badly.
+    verifier_reply = (
+        '{"finding_id":"F-001","verdict":"confirmed","severity":"critical",'
+        '"deployment_contingent":true,"poc_path":"test/F-001.t.sol",'
+        '"evidence":"deployed with signer=address(0), drained 5 ether"}'
+    )
+    ws = tmp_path / "ws"
+    (ws / "test").mkdir(parents=True)
+
+    result = audit_phase1(
+        {"anthropic": ScriptedAdapter(replies=[finder_reply, verifier_reply])},
+        _config(),
+        ToolContext(workspace=ws),
+        "src/A.sol",
+    )
+
+    assert result.verdicts[0].severity == "medium", "uncapped severity reached the result"
+    assert result.output.findings[0].severity == "medium"
+    assert result.output.findings[0].deployment_contingent is True
+    # The reader must see the precondition, not just a lowered number.
+    assert "misconfigured deployment" in result.output.report_markdown
+
+
 def test_audit_phase1_bills_a_failed_run_to_the_role_that_died(tmp_path, monkeypatch):
     """Credits running out mid-verification is the case this exists for: the
     finder's completed work and the dead verification's partial spend must both

@@ -27,6 +27,7 @@ from .agents.prompts import PHASE0_SYS, PHASE0_TOOLS
 from .agents.verifier import VERIFIER_SYS, VERIFIER_TOOLS, build_verifier_seed
 from .config import AgentConfig
 from .contracts import (
+    DEPLOYMENT_CONTINGENT_MAX,
     Finding,
     OutputParseError,
     Phase0Finding,
@@ -274,6 +275,10 @@ def verify_finding(
     if verdict.finding_id != finding.id:
         verdict = verdict.model_copy(update={"finding_id": finding.id})
     verdict = verdict.model_copy(update={"attempts": budget.used})
+    # Enforce the deployment-contingent ceiling rather than trusting the prompt:
+    # different models read the same instruction differently, and the sweep
+    # compares those models directly.
+    verdict = verdict.capped()
     return verdict, budget.used, run.usage
 
 
@@ -307,6 +312,16 @@ def _render_report(findings: dict[str, Finding], verdicts: list[Verdict]) -> str
             f"- **Contract:** `{f.contract}`",
             f"- **Location:** {f.location}",
             f"- **Hypothesis:** {f.hypothesis}",
+        ]
+        if v.deployment_contingent:
+            # Stated on the finding itself, not buried in evidence: a reader
+            # scanning severities must see that this one needed a bad deploy.
+            lines.append(
+                "- **Precondition:** requires a misconfigured deployment — the PoC "
+                "had to construct or configure the contract badly to reach this. "
+                f"Severity is capped at {DEPLOYMENT_CONTINGENT_MAX} for that reason."
+            )
+        lines += [
             f"- **PoC:** `{v.poc_path}` (proven in {v.attempts} executed forge run(s))",
             f"- **Evidence:** {v.evidence or '(none recorded)'}",
             "",
@@ -423,6 +438,7 @@ def audit_phase1(
             verdict=v.verdict,
             poc_path=v.poc_path,
             evidence=v.evidence,
+            deployment_contingent=v.deployment_contingent,
         )
         for f, v in ((by_id[v.finding_id], v) for v in verdicts)
     ]

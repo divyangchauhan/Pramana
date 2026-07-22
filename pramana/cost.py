@@ -86,7 +86,7 @@ PRICE_TABLE_VERSION = "2026-07-22"
 
 PRICE_TABLE_SOURCES = {
     "anthropic": "https://platform.claude.com/docs/en/docs/about-claude/pricing",
-    "openai": "https://developers.openai.com/api/docs/models/gpt-5.5",
+    "openai": "https://developers.openai.com/api/docs/models/gpt-5.6",
     "kimi": "https://api.moonshot.ai/",
 }
 
@@ -95,7 +95,10 @@ PRICE_TABLE_SOURCES = {
 # a gateway is a different key, not a silent reuse of this one.
 PRICES: dict[str, Price] = {
     "anthropic:claude-opus-4-8": Price(5.0, 25.0),
+    # 2x Opus on both axes — the most expensive slot in the sweep.
+    "anthropic:claude-fable-5": Price(10.0, 50.0),
     "openai:gpt-5.5": Price(5.0, 30.0),
+    "openai:gpt-5.6-sol": Price(5.0, 30.0),
     "kimi:kimi-k3": Price(3.0, 15.0),
 }
 

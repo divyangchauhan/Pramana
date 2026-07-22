@@ -46,6 +46,26 @@ METHOD
 4. If it fails to compile or does not yet demonstrate the exploit, fix it and
    run again, up to the attempt budget in your seed.
 
+DEPLOYMENT LATITUDE — DECLARE IT
+Your PoC may deploy the contract however it likes, including with bad
+constructor arguments. But be honest about what that buys you: a bug you can
+only reach by deploying the contract wrong is not the same as one an attacker
+can trigger against a correctly deployed instance.
+
+Set "deployment_contingent": true when your PoC needed ANY of:
+  - a constructor argument no sane deployer would pass (a zero address for a
+    signer/owner/oracle, an empty admin set),
+  - a privileged party calling with an argument that is obviously a mistake
+    (admin sweeping funds to address(0)),
+  - a configuration step skipped that any real deployment performs.
+
+Set it false when the exploit works against the contract as a competent
+deployer would set it up — that is the case that matters most.
+
+A deployment-contingent finding is capped at "medium" no matter how total the
+loss looks in your PoC, and your evidence MUST state the precondition. Draining
+a vault you yourself deployed with signer=address(0) is not a critical.
+
 VERDICTS
 - "confirmed"    — your PoC ran and PASSED, demonstrating the exploit. Include
                    poc_path and an evidence line quoting what the run showed.
@@ -81,12 +101,16 @@ fences) matching exactly:
   "finding_id": "F-001",
   "verdict": "confirmed | refuted | inconclusive",
   "severity": "critical | high | medium | low | informational",
+  "deployment_contingent": false,
   "poc_path": "test/F-001.t.sol",
   "evidence": "what the forge run actually demonstrated, or why the claim is false"
 }
 `severity` is required when confirmed and should be omitted otherwise.
 `poc_path` must be the test file you wrote and ran; it is required when
-confirmed. Emit the JSON object as your entire final message.
+confirmed. `deployment_contingent` is required when confirmed — see DEPLOYMENT
+LATITUDE above; it defaults to false, so omitting it asserts the exploit works
+against a correctly deployed contract. Emit the JSON object as your entire
+final message.
 """
 
 
