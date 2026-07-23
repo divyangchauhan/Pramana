@@ -11,9 +11,15 @@ the third is string equality on a free-text label. Models name one bug many
 ways — the same proven delegatecall storage collision has been reported as
 `unrestricted-delegatecall`, `arbitrary-delegatecall` and plain `access-control`
 — and label vocabulary is a per-model habit, so a grader sensitive to it partly
-ranks naming style instead of capability. Bugs with genuinely ambiguous names
-therefore declare the alternatives in fixture.json (``KnownBug.accepts``) rather
-than the synonym map being loosened globally.
+ranks naming style instead of capability. Two mechanisms keep that from costing
+a correct finding, and they answer different questions:
+
+  * `normalize_vuln_class` decides which class a label *names* when it carries
+    words from several, by specificity rather than by where the classes happen
+    to sit in the synonym map. General; applies to every label.
+  * `KnownBug.accepts` in fixture.json declares the alternative names for a bug
+    whose class is genuinely ambiguous — a delegatecall storage collision is
+    equally an access-control break. Per bug, because the ambiguity is.
 
 Run modes:
   * ``--self-check``    grade the reference PoCs (no API key; validates the
@@ -54,15 +60,19 @@ from .workspace import (
 # another with the same corpus fingerprint *and* the same grader version.
 #   1 — matching on the normalized class alone.
 #   2 — per-bug `accepts` aliases; primary-class matches take precedence.
-GRADER_VERSION = 2
+#   3 — labels resolve by specificity (qualifier tier, then needle length)
+#       instead of by the synonym map's declaration order.
+GRADER_VERSION = 3
 
 # Canonical vulnerability class -> substrings that should map to it.
 #
-# Order matters: `normalize_vuln_class` returns the first canonical whose needle
-# appears anywhere in the label, so `unprotected-delegatecall` resolves to
-# access-control rather than delegatecall. Adjective-order accidents like that
-# are why a bug may not rely on this map alone to be recognised — see the
-# per-bug `accepts` list on KnownBug.
+# Needles must be written in slug form (lowercase, `-` for punctuation), because
+# `normalize_vuln_class` slugifies the label before matching: a needle spelled
+# `tx.origin` could never fire. Enforced by test_synonym_map.
+#
+# Declaration order is *not* precedence — see `normalize_vuln_class`. It only
+# breaks ties between needles of equal length, so a class may be added anywhere
+# without silently demoting the ones below it.
 SYNONYMS: dict[str, tuple[str, ...]] = {
     "reentrancy": ("reentran", "re-entran"),
     "access-control": (
@@ -74,7 +84,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
         "owner",
         "privilege",
     ),
-    "tx-origin": ("tx-origin", "txorigin", "tx.origin"),
+    "tx-origin": ("tx-origin", "txorigin"),
     "integer-overflow": ("overflow", "underflow", "arithmetic", "batchoverflow"),
     "unchecked-call": ("unchecked", "unchecked-return", "unchecked-call", "unchecked-send"),
     "missing-zero-check": ("zero-address", "zero-check", "missing-zero", "zero-addr"),
@@ -83,13 +93,59 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "signature-replay": ("replay", "signature-replay", "missing-nonce", "sig-replay"),
 }
 
+# Needles that qualify a bug rather than name it.
+#
+# `unprotected`, `owner` and `unchecked` say how something is broken, not what
+# it is, and models reach for them as adjectives in front of every class:
+# `unprotected-delegatecall`, `unchecked-zero-address`, `owner-signature-replay`.
+# Each names its class only when nothing more specific in the label does. Length
+# alone cannot express that — `unprotected` (11) is longer than `reentran` (8) —
+# so these are ranked below any substantive match instead.
+QUALIFIERS = frozenset(
+    {
+        "unprotected",
+        "authorization",
+        "auth",
+        "ownership",
+        "owner",
+        "privilege",
+        "unchecked",
+    }
+)
+
 
 def normalize_vuln_class(raw: str) -> str:
+    """Canonicalize a free-text vulnerability label.
+
+    Labels routinely carry words belonging to two classes — `unprotected-
+    delegatecall` names both a mechanism and its precondition — so something has
+    to decide which one the label is *about*. This resolves by specificity: a
+    substantive needle beats a QUALIFIER, and within a tier the longest match
+    wins, on the basis that `delegatecall` says more than `delegate` does.
+
+    Through grader v2 this was first-match-wins over the ordered map, which made
+    precedence a function of typing position. `access-control` sits near the top
+    holding the most generic needles in the vocabulary, so it quietly captured
+    labels belonging to six other classes; `signature-replay`, declared last,
+    could be outranked by all of them. Nothing about the label is wrong when
+    that happens — the finding is correct and its PoC passes, and the run still
+    records a miss.
+
+    Ties fall back to declaration order: arbitrary, but deterministic. An exact
+    match on a canonical name always wins outright.
+    """
     key = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
+    best, best_score = key, (0, 0)
     for canonical, needles in SYNONYMS.items():
-        if key == canonical or any(n in key for n in needles):
+        if key == canonical:
             return canonical
-    return key
+        hits = [n for n in needles if n in key]
+        strong = max((len(n) for n in hits if n not in QUALIFIERS), default=0)
+        weak = max((len(n) for n in hits if n in QUALIFIERS), default=0)
+        score = (1, strong) if strong else (0, weak)
+        if score > best_score:
+            best, best_score = canonical, score
+    return best
 
 
 def accepted_classes(bug: KnownBug) -> set[str]:

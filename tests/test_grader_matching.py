@@ -17,13 +17,17 @@ sensitive to it ranks naming style, which is not what the sweep is measuring.
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from pramana.eval import harness
 from pramana.eval.harness import (
     GRADER_VERSION,
+    QUALIFIERS,
     SYNONYMS,
     Probe,
     _match_bug,
@@ -105,7 +109,7 @@ def test_an_unrelated_class_matches_nothing():
     assert _match_bug([bug], "weak-randomness", set()) is None
 
 
-# --- the synonym map's ordering is load-bearing -------------------------------
+# --- the synonym map resolves by specificity ----------------------------------
 
 
 @pytest.mark.parametrize(
@@ -119,31 +123,130 @@ def test_labels_models_actually_produced_normalize_to_delegatecall(label):
 
 
 @pytest.mark.parametrize(
-    "label,resolves_to",
+    "label,expected",
     [
-        ("unprotected-delegatecall", "access-control"),
-        ("unchecked-delegatecall", "unchecked-call"),
-        ("owner-hijack-via-delegatecall", "access-control"),
+        # Each of these was captured by access-control or unchecked-call under
+        # grader v2, purely because those classes sit higher in SYNONYMS.
+        ("unprotected-delegatecall", "delegatecall"),
+        ("unchecked-delegatecall", "delegatecall"),
+        ("owner-hijack-via-delegatecall", "delegatecall"),
+        ("privilege-escalation-via-delegatecall", "delegatecall"),
+        ("auth-via-tx-origin", "tx-origin"),
+        ("owner-mint-overflow", "integer-overflow"),
+        ("unchecked-zero-address", "missing-zero-check"),
+        ("missing-zero-address-check-on-owner", "missing-zero-check"),
+        ("owner-predictable-rng", "weak-randomness"),
+        ("unchecked-randomness", "weak-randomness"),
+        ("owner-signature-replay", "signature-replay"),
+        ("replay-of-authorized-signature", "signature-replay"),
+        ("unprotected-reentrancy", "reentrancy"),
     ],
 )
-def test_the_synonym_map_resolves_by_dict_order_not_by_specificity(label, resolves_to):
-    """Documents a real limitation rather than asserting it is desirable.
+def test_a_qualifier_does_not_capture_a_label_that_names_another_class(label, expected):
+    """The defect grader v3 fixes.
 
-    `normalize_vuln_class` returns the first canonical class whose needle appears
-    anywhere in the label, and `access-control` is declared before `delegatecall`
-    while owning the needle `unprotected`. So a delegatecall bug is three
-    adjectives away from being scored as something else, and nothing about the
-    label is wrong when that happens. This is why a bug with an ambiguous name
-    declares `accepts` instead of relying on the map.
+    A label carrying words from two classes belongs to the one it *names*.
+    `unprotected-delegatecall` is a delegatecall bug that happens to also be
+    unprotected — scoring it as access-control zeroes recall and both precision
+    axes on a correct finding whose PoC passes.
     """
-    assert normalize_vuln_class(label) == resolves_to
+    assert normalize_vuln_class(label) == expected
 
 
-def test_access_control_is_declared_before_delegatecall():
-    """The test above only means something while this holds. If someone reorders
-    SYNONYMS, these outcomes change silently — and so do recorded scores."""
-    order = list(SYNONYMS)
-    assert order.index("access-control") < order.index("delegatecall")
+@pytest.mark.parametrize(
+    "label",
+    [
+        "missing-access-control",
+        "unprotected-owner-change",
+        "broken-ownership",
+        "privilege-escalation",
+    ],
+)
+def test_a_qualifier_still_wins_when_nothing_more_specific_is_named(label):
+    """Demoting qualifiers must not make access-control unreachable: when the
+    label says only that something is unguarded, that *is* the class."""
+    assert normalize_vuln_class(label) == "access-control"
+
+
+def test_specificity_does_not_depend_on_where_a_class_sits_in_the_map():
+    """The point of v3. Under v2, precedence was declaration position, so moving
+    a class silently rescored every ambiguous label — and adding one at the
+    bottom (signature-replay) left it outranked by all eight above it."""
+    expected = {
+        "unprotected-delegatecall": "delegatecall",
+        "owner-signature-replay": "signature-replay",
+        "auth-via-tx-origin": "tx-origin",
+    }
+    reordered = dict(reversed(list(SYNONYMS.items())))
+    with mock.patch.object(harness, "SYNONYMS", reordered):
+        for label, canonical in expected.items():
+            assert normalize_vuln_class(label) == canonical
+
+
+# --- the synonym map itself ---------------------------------------------------
+
+
+def test_every_needle_is_reachable():
+    """`normalize_vuln_class` slugifies before matching, so a needle containing
+    anything a slug cannot hold is dead code that reads as coverage. The map
+    carried `tx.origin` this way until v3 — the dot can never survive."""
+    for canonical, needles in SYNONYMS.items():
+        for needle in needles:
+            assert re.fullmatch(r"[a-z0-9-]+", needle), (
+                f"{canonical}: needle {needle!r} can never match a slugified label"
+            )
+
+
+def test_every_canonical_class_normalizes_to_itself():
+    """Otherwise a fixture labeled canonically could never be matched."""
+    for canonical in SYNONYMS:
+        assert normalize_vuln_class(canonical) == canonical
+
+
+def test_qualifiers_are_needles_of_some_class():
+    """A qualifier that belongs to no class demotes nothing and just misleads."""
+    all_needles = {n for needles in SYNONYMS.values() for n in needles}
+    assert QUALIFIERS <= all_needles
+
+
+def test_no_class_is_built_only_from_qualifiers():
+    """Such a class could never win against a substantive match, so it would be
+    unreachable for exactly the labels it was added to catch."""
+    for canonical, needles in SYNONYMS.items():
+        assert set(needles) - QUALIFIERS, f"{canonical} has only qualifier needles"
+
+
+@pytest.mark.parametrize(
+    "label,expected",
+    [
+        ("reentrancy", "reentrancy"),
+        ("access-control", "access-control"),
+        ("tx-origin", "tx-origin"),
+        ("integer-overflow", "integer-overflow"),
+        ("unchecked-call", "unchecked-call"),
+        ("unchecked-send", "unchecked-call"),
+        ("missing-zero-check", "missing-zero-check"),
+        ("signature-replay", "signature-replay"),
+        ("weak-prng", "weak-randomness"),
+        ("unrestricted-delegatecall", "delegatecall"),
+        ("arbitrary-delegatecall", "delegatecall"),
+        ("controlled-delegatecall", "delegatecall"),
+        ("cross-contract-replay", "signature-replay"),
+        ("ecrecover-zero-address", "missing-zero-check"),
+        ("zero-address-signer", "missing-zero-check"),
+        ("signature-malleability", "signature-malleability"),
+        ("missing-domain-separation", "missing-domain-separation"),
+        ("dos", "dos"),
+    ],
+)
+def test_labels_already_recorded_in_runs_are_unaffected_by_v3(label, expected):
+    """Every distinct label any model has produced across all recorded runs and
+    baselines — 202 occurrences. v3 changes how ambiguous labels resolve, so the
+    claim that it rescores nothing already measured has to be checked, not
+    assumed. If a future map edit moves one of these, a recorded number changed
+    meaning and GRADER_VERSION must move with it.
+    """
+    assert normalize_vuln_class(label) == expected
 
 
 # --- end to end through grade() ----------------------------------------------
@@ -217,7 +320,8 @@ def test_an_alias_does_not_rescue_a_finding_whose_poc_failed():
 # --- versioning --------------------------------------------------------------
 
 
-def test_grader_version_is_past_the_alias_free_rules():
-    """Numbers recorded under v1 were graded without aliases. Comparing them to
-    v2 numbers compares two metrics, so the version has to travel with a run."""
-    assert GRADER_VERSION >= 2
+def test_grader_version_covers_both_matching_changes():
+    """v1 graded without aliases, v2 resolved ambiguous labels by declaration
+    order. Comparing a number across any of those compares two metrics, so the
+    version has to travel with every recorded run."""
+    assert GRADER_VERSION >= 3

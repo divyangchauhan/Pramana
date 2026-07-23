@@ -341,10 +341,14 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
     corpus_unverified = not corpus_mismatch and not (base_corpus and cand_corpus)
 
     # Same argument one level down: identical agent output scores differently
-    # under different grading rules, so a cross-version gate measures the
-    # grader change, not the pipeline. Reported, not fatal — a grader fix can
-    # only raise scores, so it cannot manufacture a false pass, and blocking
-    # every gate until the baseline is recaptured would be worse than warning.
+    # under different grading rules, so a cross-version gate measures the grader
+    # change, not the pipeline. Reported, not fatal — the honest fix is to
+    # re-record the baseline, and refusing to gate at all until someone does
+    # leaves the pipeline unguarded for longer than a loud warning does.
+    #
+    # Do not read this as safe in one direction only. v2's aliases could only
+    # *add* matches, so they could never manufacture a false pass; v3 re-resolves
+    # ambiguous labels and can move one either way.
     base_grader = baseline.get("grader_version")
     cand_grader = candidate.get("grader_version")
     grader_mismatch = bool(base_grader and cand_grader and base_grader != cand_grader)
