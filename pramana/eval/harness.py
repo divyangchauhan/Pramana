@@ -6,6 +6,15 @@ positive is a finding the agent marked "confirmed" whose PoC test the harness
 *independently re-runs and sees pass* in a pristine workspace, and whose
 vulnerability class matches a known bug in the fixture (matched 1:1).
 
+That last condition is the weak one: the first two are executable facts, while
+the third is string equality on a free-text label. Models name one bug many
+ways — the same proven delegatecall storage collision has been reported as
+`unrestricted-delegatecall`, `arbitrary-delegatecall` and plain `access-control`
+— and label vocabulary is a per-model habit, so a grader sensitive to it partly
+ranks naming style instead of capability. Bugs with genuinely ambiguous names
+therefore declare the alternatives in fixture.json (``KnownBug.accepts``) rather
+than the synonym map being loosened globally.
+
 Run modes:
   * ``--self-check``    grade the reference PoCs (no API key; validates the
                         corpus + grading path end to end).
@@ -32,13 +41,28 @@ from ..tools.foundry import ForgeResult, forge_test
 from .workspace import (
     DATASETS_DIR,
     Fixture,
+    KnownBug,
     build_workspace,
     corpus_fingerprint,
     ensure_dependencies_installed,
     load_fixtures,
 )
 
+# Bumped whenever a change alters what a run scores from identical agent output.
+# The corpus fingerprint cannot carry this: aliases and matching rules change
+# the grade without changing the task. A recorded number is only comparable to
+# another with the same corpus fingerprint *and* the same grader version.
+#   1 — matching on the normalized class alone.
+#   2 — per-bug `accepts` aliases; primary-class matches take precedence.
+GRADER_VERSION = 2
+
 # Canonical vulnerability class -> substrings that should map to it.
+#
+# Order matters: `normalize_vuln_class` returns the first canonical whose needle
+# appears anywhere in the label, so `unprotected-delegatecall` resolves to
+# access-control rather than delegatecall. Adjective-order accidents like that
+# are why a bug may not rely on this map alone to be recognised — see the
+# per-bug `accepts` list on KnownBug.
 SYNONYMS: dict[str, tuple[str, ...]] = {
     "reentrancy": ("reentran", "re-entran"),
     "access-control": (
@@ -66,6 +90,32 @@ def normalize_vuln_class(raw: str) -> str:
         if key == canonical or any(n in key for n in needles):
             return canonical
     return key
+
+
+def accepted_classes(bug: KnownBug) -> set[str]:
+    """Every normalized class that identifies ``bug``: its own, plus aliases."""
+    return {normalize_vuln_class(bug.vuln_class)} | {
+        normalize_vuln_class(alias) for alias in bug.accepts
+    }
+
+
+def _match_bug(known: list[KnownBug], cls: str, claimed: set[str]) -> KnownBug | None:
+    """The unclaimed bug that ``cls`` identifies, or None.
+
+    Primary classes are tried before aliases across the whole fixture: an alias
+    is a concession to naming ambiguity, so it must never outrank a bug that
+    carries the class outright. Without the two passes, a finding could be
+    credited to a bug that merely tolerates its label while the bug actually
+    named that way went unmatched — inflating one bug's recall and hiding the
+    other's miss inside an unchanged total.
+    """
+    for bug in known:
+        if bug.id not in claimed and normalize_vuln_class(bug.vuln_class) == cls:
+            return bug
+    for bug in known:
+        if bug.id not in claimed and cls in accepted_classes(bug):
+            return bug
+    return None
 
 
 @dataclass
@@ -133,7 +183,7 @@ def grade(
 
     for probe in probes:
         cls = normalize_vuln_class(probe.vuln_class)
-        candidate_hit = any(normalize_vuln_class(kb.vuln_class) == cls for kb in known)
+        candidate_hit = any(cls in accepted_classes(kb) for kb in known)
         candidate_hits += int(candidate_hit)
 
         poc_ran = poc_passed = False
@@ -145,13 +195,11 @@ def grade(
             poc_ran, poc_passed = res.ran, res.passed
             confirmed_pass += int(poc_passed)
 
-        is_tp = False
+        matched: KnownBug | None = None
         if probe.verdict == "confirmed" and poc_passed:
-            for kb in known:
-                if kb.id not in matched_bug_ids and normalize_vuln_class(kb.vuln_class) == cls:
-                    matched_bug_ids.add(kb.id)
-                    is_tp = True
-                    break
+            matched = _match_bug(known, cls, matched_bug_ids)
+            if matched is not None:
+                matched_bug_ids.add(matched.id)
 
         details.append(
             {
@@ -161,7 +209,15 @@ def grade(
                 "verdict": probe.verdict,
                 "poc_ran": poc_ran,
                 "poc_passed": poc_passed,
-                "counted_true_positive": is_tp,
+                "counted_true_positive": matched is not None,
+                # Which bug it was credited to, and whether the label matched
+                # outright or only via an alias. An audit trail: a run where
+                # every match is aliased is a sign the corpus labels drifted
+                # from how models actually name these bugs.
+                "matched_bug": None if matched is None else matched.id,
+                "matched_via_alias": (
+                    matched is not None and normalize_vuln_class(matched.vuln_class) != cls
+                ),
             }
         )
 
@@ -342,6 +398,9 @@ def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> 
         # Pins the corpus these numbers were scored against. Results from
         # different corpora are not comparable, however similar they look.
         "corpus_fingerprint": corpus_fingerprint(fixtures) if fixtures else None,
+        # ...and the rules they were scored under. Same corpus, different
+        # grader, different number from identical agent output.
+        "grader_version": GRADER_VERSION,
         # Negative controls hold no known bugs, so every confirmed finding on
         # one is unambiguously a false positive.
         "negative_control_fixtures": [r.fixture for r in controls],
