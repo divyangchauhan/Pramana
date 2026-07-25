@@ -9,6 +9,7 @@
     "phase1/anthropic:claude-opus-4-8"
   ],
   "corpus_fingerprint": "007869fd6cad",
+  "grader_version": 3,
   "n_runs": 3,
   "total_known_bugs": 11,
   "true_positives_per_run": [

@@ -2,6 +2,8 @@
 
 Captured **2026-07-22T08:56:12Z** at commit [`ec2e920`](https://github.com/divyangchauhan/Pramana/commit/ec2e9208680a7fe2bd140c4aba4f00de88cadd96) over **3 independent runs** of `phase1/anthropic:claude-opus-4-8`.
 
+> **Re-graded under grader v3 (2026-07-25).** These runs were originally scored before grader versioning existed. Re-grading every stored finding under v3 — recomputing classification and bug-matching while reusing the recorded verdict/PoC facts — reproduces the numbers below exactly (10/10/10 true positives, every per-finding grade unchanged). Only `grader_version: 3` was stamped into `baseline.json` and the run records; the original capture timestamp and commit are left untouched, so this remains the record of what the model produced at `ec2e920`.
+
 This is the reference point for later phases. A refactor is a regression if it drops below the observed true-positive floor, or raises the negative-control false-positive ceiling.
 
 | Fixture | Known bugs | True positives (per run) | Confirmed (per run) | Stable |
