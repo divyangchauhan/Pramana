@@ -59,3 +59,15 @@ def test_gateway_adapter_reports_its_own_provider_identity(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     assert build_adapter("openai-gateway").provider == "openai-gateway"
     assert build_adapter("openai").provider == "openai"
+
+
+def test_anthropic_gateway_validates_the_same_credential_as_anthropic(monkeypatch):
+    """The subscription proxy authenticates with the Anthropic key, so the two
+    providers share a credential requirement — a missing key must fail the same."""
+    from pramana.env import validate_provider_env
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(EnvValidationError, match="ANTHROPIC_API_KEY"):
+        validate_provider_env("anthropic-gateway")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    validate_provider_env("anthropic-gateway")  # now satisfied

@@ -30,6 +30,10 @@ def build_adapter(provider: str) -> LLMAdapter:
         from .openai import OpenAIGatewayAdapter
 
         return OpenAIGatewayAdapter()
+    if provider == "anthropic-gateway":
+        from .anthropic import AnthropicGatewayAdapter
+
+        return AnthropicGatewayAdapter()
     if provider == "kimi":
         from .kimi import KimiAdapter
 

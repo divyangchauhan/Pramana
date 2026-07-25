@@ -17,6 +17,7 @@ from dotenv import find_dotenv, load_dotenv
 # provider -> credential env vars; any one present (and non-empty) satisfies it.
 PROVIDER_ENV: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
+    "anthropic-gateway": ("ANTHROPIC_API_KEY",),
     "openai": ("OPENAI_API_KEY",),
     "openai-gateway": ("OPENAI_API_KEY",),
     "kimi": ("MOONSHOT_API_KEY", "KIMI_API_KEY"),

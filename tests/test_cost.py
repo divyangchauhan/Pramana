@@ -14,7 +14,14 @@ from dataclasses import dataclass, field
 import pytest
 
 from pramana.agents.loop import AgentRun, AgentTurnLimitError, run_agent, spent_on
-from pramana.cost import PRICES, Usage, estimate_usd, model_key, total_usd
+from pramana.cost import (
+    PRICES,
+    Usage,
+    estimate_usd,
+    estimate_usd_notional,
+    model_key,
+    total_usd,
+)
 from pramana.eval.harness import FixtureRow, _cost_summary, _usage_rows
 from pramana.providers.base import LLMResponse, ToolCall
 
@@ -84,9 +91,7 @@ class _Adapter:
     def check_capabilities(self, model: str) -> None:
         return None
 
-    def complete(
-        self, *, model, system, tools, messages, max_tokens, effort=None
-    ) -> LLMResponse:
+    def complete(self, *, model, system, tools, messages, max_tokens, effort=None) -> LLMResponse:
         self.calls += 1
         usage = {"input_tokens": 100, "output_tokens": 10}
         if self.calls <= self.turns:
@@ -100,9 +105,7 @@ class _Adapter:
 
 
 def _run(adapter, **kw) -> AgentRun:
-    return run_agent(
-        adapter, "sys", [], {"noop": lambda **_: "ok"}, seed="go", model="m", **kw
-    )
+    return run_agent(adapter, "sys", [], {"noop": lambda **_: "ok"}, seed="go", model="m", **kw)
 
 
 def test_run_agent_sums_usage_over_every_turn():
@@ -261,9 +264,11 @@ def test_first_party_row_has_no_notional_figure():
 
 
 def test_notional_total_is_separate_from_usd_total():
-    rows = [_row("a", _usage_rows(
-        {"finder": ("openai-gateway:gpt-5.5", Usage(input_tokens=2_000_000))}
-    ))]
+    rows = [
+        _row(
+            "a", _usage_rows({"finder": ("openai-gateway:gpt-5.5", Usage(input_tokens=2_000_000))})
+        )
+    ]
     summary = _cost_summary(rows)
     assert summary["usd_total"] is None
     assert summary["usd_notional_total"] == pytest.approx(10.0)
@@ -276,3 +281,16 @@ def test_notional_uses_the_first_party_price_of_the_same_model():
 
     assert notional_key("openai-gateway:gpt-5.5") == "openai:gpt-5.5"
     assert notional_key("anthropic:claude-opus-4-8") is None
+
+
+def test_anthropic_gateway_is_unpriced_but_carries_a_notional_opus_cost():
+    """A Claude subscription bills a flat fee, so an Opus run through the proxy
+    must report no actual spend — but its tokens price against first-party Opus
+    so it stays comparable on efficiency to a real-API Opus row."""
+    from pramana.cost import notional_key
+
+    key = "anthropic-gateway:claude-opus-4-8"
+    assert notional_key(key) == "anthropic:claude-opus-4-8"
+    assert estimate_usd(key, Usage(input_tokens=1_000_000)) is None
+    assert estimate_usd_notional(key, Usage(input_tokens=1_000_000)) == pytest.approx(5.0)
+    assert not [k for k in PRICES if k.startswith("anthropic-gateway:")]

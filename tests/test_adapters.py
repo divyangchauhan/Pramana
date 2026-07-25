@@ -7,13 +7,14 @@ network, no API key. They lock down the provider-neutrality boundary (design
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 from pramana import config
 from pramana.agents.prompts import READ_FILE_SCHEMA
-from pramana.providers import build_adapter
+from pramana.providers import CapabilityError, build_adapter
 from pramana.providers.anthropic import AnthropicAdapter
 from pramana.providers.base import ProviderError, ToolCall, ToolResult
 from pramana.providers.kimi import KimiAdapter
@@ -122,6 +123,119 @@ def test_build_adapter_knows_kimi_but_needs_a_key(monkeypatch):
 def test_build_adapter_rejects_unknown_provider():
     with pytest.raises(ValueError, match="unknown provider"):
         build_adapter("not-a-lab")
+
+
+# --- Anthropic capability check tolerates a partial proxy --------------------
+#
+# CLIProxyAPI serves the message surface and `GET /v1/models` but 404s on
+# `GET /v1/models/{id}` — even for models it does serve. The adapter must not
+# turn that 404 into "no such model" and abort a paid run before it starts.
+
+
+def _fake_anthropic_ns() -> SimpleNamespace:
+    class APIError(Exception):
+        pass
+
+    class NotFoundError(APIError):
+        pass
+
+    class APIStatusError(APIError):
+        pass
+
+    return SimpleNamespace(
+        APIError=APIError, NotFoundError=NotFoundError, APIStatusError=APIStatusError
+    )
+
+
+def _adapter_with_client(ns: SimpleNamespace, *, retrieve_exc=None, list_ids=None, list_exc=None):
+    class _Models:
+        def retrieve(self, model: str):
+            if retrieve_exc is not None:
+                raise retrieve_exc
+            return SimpleNamespace(id=model)
+
+        def list(self):
+            if list_exc is not None:
+                raise list_exc
+            return [SimpleNamespace(id=i) for i in (list_ids or [])]
+
+    adapter = AnthropicAdapter.__new__(AnthropicAdapter)  # skip real client construction
+    adapter._anthropic = ns  # type: ignore[attr-defined]
+    adapter._client = SimpleNamespace(models=_Models())  # type: ignore[attr-defined]
+    return adapter
+
+
+def test_capability_check_passes_when_retrieve_works():
+    ns = _fake_anthropic_ns()
+    _adapter_with_client(ns).check_capabilities("claude-opus-4-8")  # no raise
+
+
+def test_capability_check_falls_back_to_list_when_retrieve_is_unimplemented():
+    """The proxy case: retrieve 404s, but the model is in the list -> accept."""
+    ns = _fake_anthropic_ns()
+    adapter = _adapter_with_client(
+        ns, retrieve_exc=ns.NotFoundError(), list_ids=["claude-opus-4-8", "gpt-5.6-terra"]
+    )
+    adapter.check_capabilities("claude-opus-4-8")  # no raise
+
+
+def test_capability_check_rejects_a_model_absent_from_the_list():
+    ns = _fake_anthropic_ns()
+    adapter = _adapter_with_client(
+        ns, retrieve_exc=ns.NotFoundError(), list_ids=["claude-opus-4-8"]
+    )
+    with pytest.raises(CapabilityError, match="claude-opus-9"):
+        adapter.check_capabilities("claude-opus-9")
+
+
+def test_capability_check_leaves_unvalidated_when_the_list_is_also_unavailable():
+    """Neither endpoint usable -> do not block; the first request surfaces the
+    truth. Refusing to start would make the adapter unusable against a proxy."""
+    ns = _fake_anthropic_ns()
+    adapter = _adapter_with_client(
+        ns, retrieve_exc=ns.NotFoundError(), list_exc=ns.APIError("list unimplemented")
+    )
+    adapter.check_capabilities("claude-opus-4-8")  # no raise
+
+
+def test_capability_check_surfaces_a_non_404_retrieve_error():
+    """A 401/permission error is not "unimplemented" — it must not be swallowed
+    by the list fallback."""
+    ns = _fake_anthropic_ns()
+    adapter = _adapter_with_client(ns, retrieve_exc=ns.APIStatusError("forbidden"))
+    with pytest.raises(ProviderError, match="could not validate"):
+        adapter.check_capabilities("claude-opus-4-8")
+
+
+# --- anthropic-gateway: same model, honest cost ------------------------------
+
+
+def test_anthropic_gateway_is_a_registered_provider():
+    assert "anthropic-gateway" in config.SUPPORTED_PROVIDERS
+    assert config.DEFAULT_MODELS["anthropic-gateway"] == config.DEFAULT_MODELS["anthropic"]
+
+
+def test_anthropic_gateway_refuses_to_run_without_a_base_url(monkeypatch):
+    """Without ANTHROPIC_BASE_URL the SDK reaches first-party Anthropic while the
+    run labels itself a gateway — wrong provenance and wrong (absent) pricing."""
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    with pytest.raises(ProviderError, match="ANTHROPIC_BASE_URL"):
+        build_adapter("anthropic-gateway")
+
+
+def test_anthropic_gateway_reports_its_own_identity_and_longer_retries(monkeypatch):
+    from pramana.providers.anthropic import AnthropicGatewayAdapter
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8317")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    adapter = build_adapter("anthropic-gateway")
+    assert adapter.provider == "anthropic-gateway"
+    # Same wire translation as first-party — only identity and billing differ.
+    assert adapter._to_wire is AnthropicAdapter._to_wire  # type: ignore[attr-defined]
+    # The burst-tolerant policy, not the first-party default.
+    assert adapter.retry_policy is AnthropicGatewayAdapter.RETRY_POLICY  # type: ignore[attr-defined]
+    assert adapter.retry_policy.attempts > 4  # type: ignore[union-attr]
 
 
 # --- OpenAI-compatible gateways ----------------------------------------------

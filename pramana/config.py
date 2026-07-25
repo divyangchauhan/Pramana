@@ -18,6 +18,10 @@ from dataclasses import dataclass, field
 # check lists what that endpoint actually serves.
 DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-opus-4-8",
+    # Same model and wire protocol as `anthropic`, separate identity so a
+    # subscription-proxy run is not priced off the first-party table (see
+    # providers.anthropic.AnthropicGatewayAdapter). Requires ANTHROPIC_BASE_URL.
+    "anthropic-gateway": "claude-opus-4-8",
     "openai": "gpt-5.5",
     # Same wire protocol as `openai`, separate identity so gateway runs are not
     # priced off the first-party table (see providers.openai.OpenAIGatewayAdapter).

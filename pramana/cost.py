@@ -105,7 +105,10 @@ PRICES: dict[str, Price] = {
 
 # Gateway provider -> the first-party provider whose list price its models are
 # served under. Used only to compute a *notional* cost; never to fill in `usd`.
-NOTIONAL_EQUIVALENT: dict[str, str] = {"openai-gateway": "openai"}
+NOTIONAL_EQUIVALENT: dict[str, str] = {
+    "openai-gateway": "openai",
+    "anthropic-gateway": "anthropic",
+}
 
 
 def model_key(provider: str, model: str) -> str:

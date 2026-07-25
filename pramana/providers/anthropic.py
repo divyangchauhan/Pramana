@@ -26,7 +26,7 @@ from .base import (
     ToolCall,
     ToolSchema,
 )
-from .retry import call_with_retries
+from .retry import RetryPolicy, call_with_retries
 
 
 def _log_retry(provider: str, model: str):
@@ -44,24 +44,90 @@ def _log_retry(provider: str, model: str):
     return _report
 
 
+class AnthropicGatewayAdapter:
+    """The Anthropic message surface served by a subscription-replaying proxy.
+
+    Same wire protocol and the same model as first-party ``anthropic`` — the
+    only difference is billing. A proxy replaying a Claude subscription charges
+    a flat fee, not $5/$25 per million tokens, so reusing the ``anthropic``
+    identity would price these runs off the first-party table and report dollars
+    that were never charged. This is the Anthropic twin of OpenAIGatewayAdapter;
+    the reasoning there applies verbatim.
+
+    Keyed ``anthropic-gateway:<model>``, absent from the price table, so it
+    reports ``usd: null`` — an honest gap. Quality metrics are fully valid;
+    only cost is unknown.
+
+    Requires ``ANTHROPIC_BASE_URL``: without it the SDK would silently talk to
+    first-party Anthropic while the run recorded itself as a gateway.
+    """
+
+    provider = "anthropic-gateway"
+
+    # A subscription proxy goes unavailable in *bursts* while its OAuth token
+    # refreshes — minutes, not seconds. The first-party default (4 attempts over
+    # ~10s) cannot bridge that, and one unbridged burst discards the whole run.
+    RETRY_POLICY = RetryPolicy(attempts=7, base_delay=2.0, max_delay=90.0)
+
+    def __new__(cls) -> Any:
+        import os
+
+        if not os.environ.get("ANTHROPIC_BASE_URL", "").strip():
+            raise ProviderError(
+                "provider 'anthropic-gateway' requires ANTHROPIC_BASE_URL to point "
+                "at the proxy; without it the run would reach first-party Anthropic "
+                "while recording itself as a gateway run"
+            )
+        adapter = AnthropicAdapter()
+        adapter.provider = cls.provider  # identity differs; wire protocol does not
+        adapter.retry_policy = cls.RETRY_POLICY
+        return adapter
+
+
 class AnthropicAdapter:
     provider = "anthropic"
+    # Overridden per-instance by the gateway, whose failures last longer.
+    retry_policy: RetryPolicy | None = None
 
     def __init__(self) -> None:
         import anthropic  # lazy: importing pramana must not require the SDK
 
         self._anthropic = anthropic
-        # Zero-arg client resolves ANTHROPIC_API_KEY / auth profile from the env.
+        # Zero-arg client resolves ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL from
+        # the env — the latter is how the gateway points this at the proxy.
         self._client = anthropic.Anthropic()
 
     def check_capabilities(self, model: str) -> None:
+        """Fail fast on an unknown model id, before any fixture is run.
+
+        Tries ``models.retrieve`` first, then falls back to ``models.list``: a
+        subscription-replaying proxy (CLIProxyAPI) serves the message surface
+        but not per-model retrieve, and a 404 there means "unimplemented", not
+        "no such model". Tool calling is universal across Claude models, so
+        existence is enough.
+
+        If neither endpoint is usable the model is left unvalidated rather than
+        rejected — the first real request surfaces the truth, and refusing to
+        start would make the adapter unusable against a working proxy. Never
+        falls back to a *different* model: that would make results
+        irreproducible.
+        """
         try:
             self._client.models.retrieve(model)
-        except self._anthropic.NotFoundError as exc:
-            raise CapabilityError(f"anthropic model {model!r} not found") from exc
+            return
+        except self._anthropic.NotFoundError:
+            pass  # may be an unimplemented endpoint; confirm against the list
         except self._anthropic.APIStatusError as exc:  # auth/permission/etc.
             raise ProviderError(f"could not validate anthropic model {model!r}: {exc}") from exc
-        # Tool calling is universal across Claude models, so existence is enough.
+
+        try:
+            available = [m.id for m in self._client.models.list()]
+        except self._anthropic.APIError:
+            return  # endpoint unavailable/unparseable — cannot validate, do not block
+        if model not in available:
+            raise CapabilityError(
+                f"anthropic model {model!r} not found. Available: {', '.join(sorted(available))}"
+            )
 
     def complete(
         self,
@@ -96,9 +162,13 @@ class AnthropicAdapter:
                 return stream.get_final_message()
 
         try:
-            message = call_with_retries(_send, on_retry=_log_retry("anthropic", model))
+            message = call_with_retries(
+                _send,
+                policy=self.retry_policy,
+                on_retry=_log_retry(self.provider, model),
+            )
         except self._anthropic.APIError as exc:
-            raise ProviderError(f"anthropic request failed: {exc}") from exc
+            raise ProviderError(f"{self.provider} request failed: {exc}") from exc
 
         return self._from_wire(message)
 
