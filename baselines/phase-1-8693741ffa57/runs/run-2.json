@@ -1,0 +1,519 @@
+{
+  "true_positive_findings": 11,
+  "total_known_bugs": 14,
+  "corpus_fingerprint": "8693741ffa57",
+  "grader_version": 3,
+  "negative_control_fixtures": [
+    "reentrancy-vault-patched"
+  ],
+  "negative_control_false_positives": 0,
+  "negative_control_proven_false_positives": 0,
+  "unmatched_confirmed_findings": 0,
+  "cost": {
+    "price_table_version": "2026-07-22",
+    "by_role": {
+      "finder": {
+        "model": "anthropic:claude-opus-4-8",
+        "input_tokens": 52528,
+        "output_tokens": 5420,
+        "calls": 21,
+        "elapsed_s": 162.805,
+        "usd": 0.39814,
+        "usd_notional": null
+      },
+      "verifier": {
+        "model": "anthropic:claude-opus-4-8",
+        "input_tokens": 170580,
+        "output_tokens": 12403,
+        "calls": 50,
+        "elapsed_s": 882.919,
+        "usd": 1.162975,
+        "usd_notional": null
+      }
+    },
+    "usd_total": 1.561115,
+    "usd_notional_total": null
+  },
+  "fixtures": [
+    {
+      "fixture": "bank-multi",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 2,
+      "n_confirmed": 2,
+      "confirmed_poc_pass": 2,
+      "true_positive_findings": 2,
+      "n_known_bugs": 3,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 0.6666666666666666,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "reentrancy",
+          "normalized": "reentrancy",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        },
+        {
+          "id": "F-002",
+          "vuln_class": "access-control",
+          "normalized": "access-control",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-2",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 5457,
+          "output_tokens": 590,
+          "calls": 2,
+          "elapsed_s": 12.516,
+          "usd": 0.042035,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 46885,
+          "output_tokens": 2889,
+          "calls": 12,
+          "elapsed_s": 81.142,
+          "usd": 0.30665,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "delegatecall-module",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "controlled-delegatecall",
+          "normalized": "delegatecall",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 5080,
+          "output_tokens": 531,
+          "calls": 2,
+          "elapsed_s": 11.492,
+          "usd": 0.038675,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 12486,
+          "output_tokens": 944,
+          "calls": 4,
+          "elapsed_s": 154.454,
+          "usd": 0.08603,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "reentrancy-vault",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "reentrancy",
+          "normalized": "reentrancy",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 5072,
+          "output_tokens": 362,
+          "calls": 2,
+          "elapsed_s": 8.916,
+          "usd": 0.03441,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 12492,
+          "output_tokens": 884,
+          "calls": 4,
+          "elapsed_s": 31.631,
+          "usd": 0.08456,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "reentrancy-vault-patched",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 0,
+      "n_confirmed": 0,
+      "confirmed_poc_pass": 0,
+      "true_positive_findings": 0,
+      "n_known_bugs": 0,
+      "finder_precision": null,
+      "verifier_precision": null,
+      "recall": null,
+      "n_refuted": 0,
+      "error": null,
+      "details": [],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 4544,
+          "output_tokens": 214,
+          "calls": 2,
+          "elapsed_s": 7.17,
+          "usd": 0.02807,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "calls": 0,
+          "elapsed_s": 0.0,
+          "usd": 0.0,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "signature-replay-vault",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 2,
+      "n_confirmed": 2,
+      "confirmed_poc_pass": 2,
+      "true_positive_findings": 2,
+      "n_known_bugs": 3,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 0.6666666666666666,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "signature-replay",
+          "normalized": "signature-replay",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        },
+        {
+          "id": "F-002",
+          "vuln_class": "access-control",
+          "normalized": "access-control",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-2",
+          "matched_via_alias": true
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 8064,
+          "output_tokens": 1200,
+          "calls": 3,
+          "elapsed_s": 24.004,
+          "usd": 0.07032,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 24806,
+          "output_tokens": 1917,
+          "calls": 8,
+          "elapsed_s": 41.61,
+          "usd": 0.171955,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "tx-origin-wallet",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "tx-origin",
+          "normalized": "tx-origin",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 5306,
+          "output_tokens": 410,
+          "calls": 2,
+          "elapsed_s": 9.339,
+          "usd": 0.03678,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 12386,
+          "output_tokens": 943,
+          "calls": 4,
+          "elapsed_s": 32.493,
+          "usd": 0.085505,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "unchecked-overflow-token",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "integer-overflow",
+          "normalized": "integer-overflow",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 4500,
+          "output_tokens": 619,
+          "calls": 2,
+          "elapsed_s": 17.643,
+          "usd": 0.037975,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 12541,
+          "output_tokens": 965,
+          "calls": 4,
+          "elapsed_s": 417.996,
+          "usd": 0.08683,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "unchecked-send-payouts",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 2,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 0.5,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "unchecked-call",
+          "normalized": "unchecked-call",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 4568,
+          "output_tokens": 451,
+          "calls": 2,
+          "elapsed_s": 13.839,
+          "usd": 0.034115,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 12307,
+          "output_tokens": 1129,
+          "calls": 4,
+          "elapsed_s": 30.824,
+          "usd": 0.08976,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "unprotected-owner",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "access-control",
+          "normalized": "access-control",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 4823,
+          "output_tokens": 379,
+          "calls": 2,
+          "elapsed_s": 14.503,
+          "usd": 0.03359,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 23699,
+          "output_tokens": 1326,
+          "calls": 6,
+          "elapsed_s": 30.945,
+          "usd": 0.151645,
+          "usd_notional": null
+        }
+      }
+    },
+    {
+      "fixture": "weak-randomness-lottery",
+      "config": "phase1/anthropic:claude-opus-4-8@medium",
+      "n_candidates": 1,
+      "n_confirmed": 1,
+      "confirmed_poc_pass": 1,
+      "true_positive_findings": 1,
+      "n_known_bugs": 1,
+      "finder_precision": 1.0,
+      "verifier_precision": 1.0,
+      "recall": 1.0,
+      "n_refuted": 0,
+      "error": null,
+      "details": [
+        {
+          "id": "F-001",
+          "vuln_class": "weak-prng",
+          "normalized": "weak-randomness",
+          "verdict": "confirmed",
+          "poc_ran": true,
+          "poc_passed": true,
+          "counted_true_positive": true,
+          "matched_bug": "KB-1",
+          "matched_via_alias": false
+        }
+      ],
+      "usage": {
+        "finder": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 5114,
+          "output_tokens": 664,
+          "calls": 2,
+          "elapsed_s": 43.383,
+          "usd": 0.04217,
+          "usd_notional": null
+        },
+        "verifier": {
+          "model": "anthropic:claude-opus-4-8",
+          "input_tokens": 12978,
+          "output_tokens": 1406,
+          "calls": 4,
+          "elapsed_s": 61.824,
+          "usd": 0.10004,
+          "usd_notional": null
+        }
+      }
+    }
+  ]
+}
