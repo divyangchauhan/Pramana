@@ -102,7 +102,7 @@ The single-agent Phase 0 run reached the same verdict by a more legible route: i
 > `withdraw()` zeroes the balance (effect) **before** the external call (interaction). A reentrant call finds a zero balance and reverts. […] The test PASSES demonstrating the exploit does NOT work.
 > — [`baselines/phase-0/reports/reentrancy-vault-patched.md`](baselines/phase-0/reports/reentrancy-vault-patched.md)
 
-Either way it is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported. Worth noting honestly: the split makes the *clean-contract* report thinner, since a claim filtered out at the proposal stage leaves no record of what was checked. That is a deliverable-quality gap no current metric captures, and a job for the Phase 2 reporter.
+Either way it is the difference between reasoning about code and pattern-matching its shape — and it is only visible *because* the corpus contains something that must not be reported. Worth noting honestly: the split makes the *clean-contract* report thinner, since a claim filtered out at the proposal stage leaves no record of what was checked — a deliverable-quality gap no current metric captures. The [Phase 2 reporter](#how-it-works) (Nirnaya) is the stage that owns deliverable quality, though closing this particular gap fully would mean recording what the finder ruled out, which it does not yet do.
 
 📊 **[Baseline records →](baselines/)** — every run, per-fixture stability, pinned commit, config and corpus, plus the agent's own audit reports.
 
@@ -165,7 +165,9 @@ flowchart TD
     end
 
     CLAIM --> V
-    V --> OUT["confirmed / refuted / inconclusive<br/>+ audit report"]
+    V --> OUT["confirmed / refuted / inconclusive<br/>verdicts + proven PoCs"]
+    OUT --> R["Nirnaya · reporter — no tools, sees every verdict at once"]
+    R --> REP["audit deliverable<br/>LLM prose over governed facts"]
     OUT --> EV["eval harness"]
     EV -->|"re-runs each confirmed PoC<br/>in a pristine workspace"| TP["✅ true positives"]
 ```
@@ -176,7 +178,8 @@ A single audit, start to finish:
 2. **Investigate.** The finder reads the actual Solidity (`read_file`), traces the flow, and proposes falsifiable exploit hypotheses grounded in code it actually inspected. It has no ability to write or execute anything.
 3. **Isolate.** Each hypothesis is passed to a separate verifier as a **bare claim** — contract, location, class, hypothesis. The finder's notes and severity guess are withheld.
 4. **Disprove.** The verifier's default assumption is that the claim is *false*. It writes a Foundry PoC (`write_file`) and runs it (`run_foundry_test`); only a passing, assertion-backed test flips the verdict to `confirmed`. Otherwise it returns `refuted` or `inconclusive`.
-5. **Score.** The harness rebuilds a fresh workspace with the *pristine* target, copies in only the agent's PoC, and re-runs it — so a finding counts only if the exploit truly executes.
+5. **Report** *(Phase 2, Nirnaya)*. A third `run_agent` role — no tools, the cheap synthesis slot — turns the settled verdicts into the client deliverable. It is the only stage that sees every finding at once, so it is where cross-finding duplicates are caught (each verifier saw one claim in isolation). It writes the prose; **severity, PoC path, verdict and counts come from the verdicts, not the model** — the same [governed-in-code](#why-the-design-holds-up) discipline as the severity cap — so a reporter can enrich a finding but cannot move a number or drop one, and a report it can't produce falls back to a deterministic render.
+6. **Score.** The harness rebuilds a fresh workspace with the *pristine* target, copies in only the agent's PoC, and re-runs it — so a finding counts only if the exploit truly executes.
 
 **Why the split matters.** The isolation is structural, not prompted: each verification is its own `run_agent` call with a physically separate `messages` list, seeded from a whitelist (`contracts.bare_claim`). There is no channel through which the finder's confidence can reach the verifier — and because the seed is a whitelist, a field added to `Finding` later cannot silently start leaking. Tool scope enforces the same boundary: the finder *cannot* prove its own hypothesis, because it has no `write_file`.
 
@@ -204,7 +207,7 @@ Four ideas do the heavy lifting — each is a deliberate engineering choice, not
 - **Executable verification.** Ground truth is `forge test`, not the model's self-assessment. The harness re-runs each PoC against the *original* contract in an isolated workspace, so the agent can't fake a pass by editing the target. `inconclusive` verdicts and non-passing PoCs never count.
 - **Eval-first, not eval-later.** The measurement harness ships in the same slice as the pipeline. Every run produces a reproducible true-positive count plus supporting diagnostics (candidate volume, precision before/after verification, recall) — the instrument for answering *"which model, which prompt, which config actually performs?"* empirically.
 - **Provider-neutral core.** The agent loop never imports a lab SDK; it speaks one canonical message/tool format. Swapping Claude ↔ GPT ↔ Kimi is a config change, and adding a lab is one adapter file. This is what lets the eval sweep models instead of betting on one.
-- **Severity governed in code, not prompt.** A bug provable only by *deploying the contract badly yourself* (e.g. `signer = address(0)`) is real but not attacker-reachable, and must not outrank a live exploit. The verifier declares `deployment_contingent`, and `Verdict.capped()` enforces the ceiling in Python — because the sweep compares models directly, and a rule left to the prompt would be read differently by each one, distorting the very comparison it exists to make.
+- **Governed in code, not prompt.** The facts a report is judged on are enforced in Python, never left to a model to honor. A bug provable only by *deploying the contract badly yourself* (e.g. `signer = address(0)`) is real but not attacker-reachable, and must not outrank a live exploit: the verifier declares `deployment_contingent` and `Verdict.capped()` enforces the ceiling in Python — because the sweep compares models directly, and a rule left to the prompt would be read differently by each one, distorting the very comparison it exists to make. The reporter follows the same discipline: it authors prose, but severity, PoC path, verdict and counts are woven in from the verdicts by the renderer, so a reporter can enrich a finding but can never move a number or drop one.
 
 ---
 
@@ -311,6 +314,11 @@ uv run python -m pramana.eval.baseline --runs runs/run-*.json \
 uv run python -m pramana.eval.harness --provider openai --model <model-id>
 uv run python -m pramana.eval.harness --provider kimi   --model <kimi-k3-id>
 
+# pipelines and per-role routing
+--pipeline phase2                              # add the reporter (Nirnaya) that writes the deliverable
+--reporter-model <cheap-model-id>              # route the cheap synthesis slot to a smaller model
+--finder-model <id> --verifier-model <id>      # route the two hard roles independently
+
 # handy flags
 --fixtures reentrancy-vault tx-origin-wallet   # restrict the set
 --json results.json                            # full per-finding results
@@ -344,10 +352,10 @@ Each adapter validates its model at startup and never silently falls back to ano
 ```
 pramana/
 ├── providers/          # canonical adapter boundary (base) + anthropic / openai / kimi
-├── agents/             # run_agent (bounded, isolated loop) + finder / verifier prompts & tool scopes
+├── agents/             # run_agent (bounded, isolated loop) + finder / verifier / reporter prompts & tool scopes
 ├── tools/              # sandboxed read_file / write_file / run_slither / run_foundry_test
-├── contracts.py        # Pydantic Finding / Verdict / Phase0Output + boundary parsing
-├── pipeline.py         # the orchestrator — audit_phase0 / audit_phase1
+├── contracts.py        # Pydantic Finding / Verdict / ReporterOutput / Phase0Output + boundary parsing
+├── pipeline.py         # the orchestrator — audit_phase0 / audit_phase1 / audit_phase2
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
 └── eval/
@@ -359,7 +367,7 @@ pramana/
     └── refutation.py   # puts hand-written claims to the verifier, bypassing the finder
 baselines/              # recorded baselines + the agent's audit reports
 baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
-tests/                  # 271 offline tests (parsing, grading, isolation, tool scope, refusal handling, severity cap, corpus integrity)
+tests/                  # 294 offline tests (parsing, grading, isolation, tool scope, refusal handling, severity cap, reporter governance, corpus integrity)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -369,12 +377,12 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 271 offline tests, no network/keys
+uv run pytest                      # 294 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```
 
-Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching and specificity-based label resolution), the grading paths (a non-passing PoC or wrong class never counts), the deployment-contingent severity cap (a mutation check fails the suite if the cap is removed from the pipeline), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for every lab, refusal handling (a model that declines at its safety layer is recorded as a refusal, not a parse error), gateway-vs-first-party pricing (a gateway key may never enter the price table), env validation, baseline aggregation over disagreeing runs, and the negative control's own integrity — including replaying the real exploit against the patched twin to prove it fails. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching and specificity-based label resolution), the grading paths (a non-passing PoC or wrong class never counts), the deployment-contingent severity cap (a mutation check fails the suite if the cap is removed from the pipeline), the reporter's governance boundary (its prose is woven in, but a reporter cannot move a severity, drop a finding, or invent a count — and an unreadable report falls back to a deterministic render), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for every lab, refusal handling (a model that declines at its safety layer is recorded as a refusal, not a parse error), gateway-vs-first-party pricing (a gateway key may never enter the price table), env validation, baseline aggregation over disagreeing runs, and the negative control's own integrity — including replaying the real exploit against the patched twin to prove it fails. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ---
 
@@ -384,7 +392,7 @@ Pramana is built as a **vertical slice first**, deepening before it widens — e
 
 - **Phase 0 — Vertical slice** ✅ — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus. [Baseline](baselines/phase-0/).
 - **Phase 1 — Split the verifier** ✅ — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis. Gated against the [Phase 0 baseline](baselines/phase-0/) and recorded as the [Phase 1 gate reference](baselines/phase-1-8693741ffa57/).
-- **Phase 2 — Routing + governance** 🚧 *(current)* — the [four-model sweep](#a-four-model-sweep) (per-role routing, priced per role) and its subscription-proxy gateways; a **deployment-contingent severity cap** so a bug that needs a misconfigured deploy can't outrank an attacker-reachable one; and the corpus expansion the sweep surfaced. Still ahead: the **reporter** agent (Nirnaya) that writes the deliverable and — seeing every verdict at once — is the natural place to catch cross-finding duplicates; Slither/compile caching.
+- **Phase 2 — Routing, governance + the reporter** 🚧 *(current)* — the [four-model sweep](#a-four-model-sweep) (per-role routing, priced per role) and its subscription-proxy gateways; a **deployment-contingent severity cap** so a bug that needs a misconfigured deploy can't outrank an attacker-reachable one; the corpus expansion the sweep surfaced; and the **reporter** agent (Nirnaya) that writes the client deliverable — the third `run_agent` role, and the only stage that sees every verdict at once, so it is where cross-finding duplicates are caught. It authors prose (description, impact, remediation, executive summary, duplicate links); severity, PoC path, verdict and counts stay [governed in code](#why-the-design-holds-up), so a reporter can enrich a finding but never move a number or drop one. Still ahead: Slither/compile caching.
 - **Phase 3 — Scale & harden** — public benchmarks (Code4rena / Sherlock / DeFiHackLabs), a full paired vulnerable/patched set, and structured observability.
 
 The three agents have fixed identities — **Anumana** (finder / inference), **Khandana** (verifier / refutation), **Nirnaya** (reporter / conclusion) — the three *pramāṇas* by which a finding becomes proven knowledge.
