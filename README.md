@@ -34,26 +34,44 @@ The headline metric is **true-positive findings confirmed with an executable PoC
 
 ### The corpus is real, and provable without an API key
 
-Every one of the 11 labeled bugs ships with a reference exploit the harness executes in a pristine workspace. `--self-check` runs the entire scoring pipeline — workspace build → `forge test` → class match → count — with **no key and no network**:
+Every one of the 14 labeled bugs ships with a reference exploit the harness executes in a pristine workspace. `--self-check` runs the entire scoring pipeline — workspace build → `forge test` → class match → count — with **no key and no network**:
 
 ```
-HEADLINE — true-positive findings confirmed with executable PoCs: 11 / 11 known bugs
+HEADLINE — true-positive findings confirmed with executable PoCs: 14 / 14 known bugs
 NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
 ```
 
 That is the corpus proving itself, not the agent. It means a failure in a live run is the pipeline's, never a broken fixture.
 
-### Live agent runs
+### A four-model sweep
 
-| Config | Corpus | True positives | Control FPs | Runs |
-|---|---|:---:|:---:|:---:|
-| **`phase1/anthropic:claude-opus-4-8`** | **current, 11 bugs** (`007869fd6cad`) | **10 / 11** | **0** | **3** |
-| `phase1/anthropic:claude-opus-4-8` | hint-free, 6 bugs | 6 / 6 | 0 | 1 |
-| `phase1/kimi:kimi-k3` | hint-free, 6 bugs | 6 / 6 | 0 | 1 |
-| `phase0/anthropic:claude-opus-4-8` | pre-strip, 6 bugs | 6 / 6 | 0 | 3 |
-| `phase1/anthropic:claude-opus-4-8` | pre-strip, 6 bugs | 6 / 6 | 0 | 3 |
+Because the core is provider-neutral, the same pipeline runs unmodified across labs — the comparison is apples-to-apples by construction. This is `phase1` (finder → isolated verifier) at `effort=medium`, three runs per model, graded against the current **14-bug** corpus (`8693741ffa57`):
 
-> **Read these honestly.** Only the first row describes the current corpus; the rest predate it and are kept as history. Runs and baselines record a `corpus_fingerprint` precisely so this cannot be glossed over — comparing across corpora reports *"not comparable"* rather than a verdict. See [`baselines/`](baselines/).
+| Model | Access | True positives / 14 (3 runs) | Control FPs | |
+|---|---|:---:|:---:|---|
+| `claude-opus-4-8` | first-party | 11 · 11 · 11 | 0 | gate reference — stable floor |
+| `gpt-5.5` | subscription proxy | 11 · 11 · 11 | 0 | matches Opus at zero marginal cost |
+| `gpt-5.6-terra` | subscription proxy | 12 · 12 · 10 | 0 | run-3 recall dip |
+| **`kimi-k3`** 🏆 | first-party | **13 · 11 · 13** | 0 | **highest peaks; found every uncatalogued bug** |
+| `claude-fable-5` | first-party | — | — | *refused the task — see below* |
+
+**Winner: `kimi-k3`, on discovery power** — the axis that matters for an audit tool. It posted the highest true-positive peaks (13/14) and was the only model to surface all three bugs the corpus itself was missing (next section). `gpt-5.5` is the best *value* — it matches the Opus floor at zero marginal cost on a flat subscription — but finds fewer distinct bugs. Opus is the **gate reference**: a fixed regression yardstick chosen for reproducibility (first-party, stable), used to catch *code* regressions between phases. Being the yardstick is not the same as being the best model, and here it isn't.
+
+**One model refused — and that is a result, not a gap.** `claude-fable-5` returned `stop_reason: "refusal"` with empty content on every fixture — a model-level safety decline of the vulnerability-finder task, not a bug or a misconfiguration (the identical prompt runs cleanly on Opus, confirmed by capturing the raw response). A provider-neutral harness turns that difference from an anecdote into a measurement: it shows up as a row, priced and logged, beside the models that ran.
+
+Every run and baseline records a `corpus_fingerprint` and a `grader_version`, so comparing across corpora or grading rules reports *"not comparable"* rather than a misleading number. See [`baselines/`](baselines/).
+
+#### The sweep audited the corpus
+
+The sweep's most useful finding was about the *corpus*, not the models. Exploits the grader marked "unmatched confirmed" — real, PoC-passing bugs with no label to match — turned out to be genuine defects the corpus never catalogued, not hallucinations (the negative control held at **0** false positives across all runs). Three were canonized, each with an executable reference PoC, taking the corpus from **11 → 14** known bugs (`007869fd6cad` → `8693741ffa57`, grader unchanged):
+
+| New bug | Fixture | Found by |
+|---|---|---|
+| `zero-signer` | signature-replay-vault | every model, every run |
+| `fixed-gas-transfer` (transfer-DoS) | signature-replay-vault | kimi-k3 only |
+| `missing-zero-check` (zero-addr burn) | unchecked-send-payouts | kimi-k3 + gpt-5.6-terra |
+
+The new baseline was produced by **re-grading the saved runs, without re-invoking a single model**: a PoC's pass/fail is invariant to a corpus change — only *which* known bug it matches can differ — so each finding was rescored through the real grading path from its recorded verdict and PoC result. An eval that can find bugs in its own answer key is an eval worth trusting.
 
 ### What a run costs
 
@@ -75,7 +93,7 @@ that the finder is the expensive one. **The verifier costs more** (59% of the
 bill here): it writes code, runs it, reads failures and retries, while the
 finder reads and proposes once.
 
-**Recall is no longer 100%, which is the point of having grown the corpus.** All three runs agree exactly, and the single miss is specific: `bank-multi` KB-3, the `sweep(address(0))` fund-burn. `claude-opus-4-8` never proposed it; `kimi-k3` found it. Six bugs across five classes could not tell two configurations apart — eleven across nine can.
+**Recall is deliberately below 100%, and the models now genuinely disagree — which is the point.** Opus holds a rock-steady 11/14 while kimi peaks at 13/14, and the gap is *specific* bugs — the transfer-DoS, the zero-address burn — that one model proposes and another never does. A corpus small enough that every model aces it cannot rank anything; fourteen bugs across eleven classes can.
 
 The negative control is the result worth dwelling on. Handed a contract that *looks* exactly like the DAO reentrancy fixture, the pipeline reports nothing — the finder reads the ordering, sees the effect applied before the interaction, and proposes no candidate at all, so no verifier is ever invoked.
 
@@ -181,17 +199,18 @@ Here's a real audit (`--verbose`), including the verifier debugging its own PoC:
 
 ## Why the design holds up
 
-Three ideas do the heavy lifting — each is a deliberate engineering choice, not an accident of the prototype:
+Four ideas do the heavy lifting — each is a deliberate engineering choice, not an accident of the prototype:
 
 - **Executable verification.** Ground truth is `forge test`, not the model's self-assessment. The harness re-runs each PoC against the *original* contract in an isolated workspace, so the agent can't fake a pass by editing the target. `inconclusive` verdicts and non-passing PoCs never count.
 - **Eval-first, not eval-later.** The measurement harness ships in the same slice as the pipeline. Every run produces a reproducible true-positive count plus supporting diagnostics (candidate volume, precision before/after verification, recall) — the instrument for answering *"which model, which prompt, which config actually performs?"* empirically.
 - **Provider-neutral core.** The agent loop never imports a lab SDK; it speaks one canonical message/tool format. Swapping Claude ↔ GPT ↔ Kimi is a config change, and adding a lab is one adapter file. This is what lets the eval sweep models instead of betting on one.
+- **Severity governed in code, not prompt.** A bug provable only by *deploying the contract badly yourself* (e.g. `signer = address(0)`) is real but not attacker-reachable, and must not outrank a live exploit. The verifier declares `deployment_contingent`, and `Verdict.capped()` enforces the ceiling in Python — because the sweep compares models directly, and a rule left to the prompt would be read differently by each one, distorting the very comparison it exists to make.
 
 ---
 
 ## The corpus
 
-Nine self-contained vulnerable fixtures spanning nine vulnerability classes, each with a labeled known-bug set and a reference exploit that the harness re-runs offline:
+Nine self-contained vulnerable fixtures holding **14 known bugs across eleven vulnerability classes**, each bug with a labeled entry and a reference exploit that the harness re-runs offline:
 
 | Fixture | Class(es) | Modeled on |
 |---|---|---|
@@ -199,13 +218,13 @@ Nine self-contained vulnerable fixtures spanning nine vulnerability classes, eac
 | `unprotected-owner` | access-control | Parity multisig unprotected initializer (2017) |
 | `tx-origin-wallet` | tx-origin | SWC-115 `tx.origin` phishing |
 | `unchecked-overflow-token` | integer-overflow | BeautyChain (BEC) `batchOverflow` (2018) |
-| `unchecked-send-payouts` | unchecked-call | SWC-104 — King of the Ether (2016) |
+| `unchecked-send-payouts` | unchecked-call **+** missing-zero-check | SWC-104 — King of the Ether (2016) |
 | `delegatecall-module` | delegatecall | SWC-112 — Parity multisig library kill (2017) |
 | `weak-randomness-lottery` | weak-randomness | SWC-120 — chain-attribute RNG |
-| `signature-replay-vault` | signature-replay | SWC-121 — missing nonce |
+| `signature-replay-vault` | signature-replay **+** zero-signer **+** fixed-gas-transfer | SWC-121 — missing nonce |
 | `bank-multi` | reentrancy **+** access-control **+** missing-zero-check | composite three-bug contract — exercises 1:1 matching |
 
-Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline.
+Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` exploit PoC that validates the grader offline. Three of these bugs — the two extras on `signature-replay-vault` and the `missing-zero-check` on `unchecked-send-payouts` — were [added *because the sweep found them*](#the-sweep-audited-the-corpus): the eval discovered real defects its own answer key was missing.
 
 **The label is the weakest link in the metric.** Two of the three true-positive conditions are executable facts — the agent said "confirmed", and the harness re-ran the PoC and watched it pass. The third is string equality on a free-text vulnerability class, and models name one bug many ways: the same proven delegatecall storage collision arrived as `unrestricted-delegatecall`, `arbitrary-delegatecall`, `controlled-delegatecall` and plain `access-control` across six runs. The last one scored **zero** on recall *and* both precision axes — for a finding whose exploit drained the vault in front of the grader. Vocabulary is a per-model habit, so a grader sensitive to it partly ranks naming style instead of capability, which is fatal to a cross-model sweep.
 
@@ -250,15 +269,15 @@ bank-multi                 reference-poc             3    0    3     3   3    1.
 delegatecall-module        reference-poc             1    0    1     1   1    1.00
 reentrancy-vault           reference-poc             1    0    1     1   1    1.00
 reentrancy-vault-patched   reference-poc             0    0    0     0   0       -
-signature-replay-vault     reference-poc             1    0    1     1   1    1.00
+signature-replay-vault     reference-poc             3    0    3     3   3    1.00
 tx-origin-wallet           reference-poc             1    0    1     1   1    1.00
 unchecked-overflow-token   reference-poc             1    0    1     1   1    1.00
-unchecked-send-payouts     reference-poc             1    0    1     1   1    1.00
+unchecked-send-payouts     reference-poc             2    0    2     2   2    1.00
 unprotected-owner          reference-poc             1    0    1     1   1    1.00
 weak-randomness-lottery    reference-poc             1    0    1     1   1    1.00
 ----------------------------------------------------------------------------------
 
-HEADLINE — true-positive findings confirmed with executable PoCs: 11 / 11 known bugs
+HEADLINE — true-positive findings confirmed with executable PoCs: 14 / 14 known bugs
 NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
 ```
 
@@ -311,9 +330,10 @@ The core depends only on the canonical types in `providers/base.py`; each adapte
 
 | Provider | Adapter | Notes |
 |---|---|---|
-| **Anthropic** | `providers/anthropic.py` | Messages API via streaming (safe for large `max_tokens`); default `claude-opus-4-8`. No `temperature`/`thinking` config. |
-| **OpenAI** | `providers/openai.py` | Chat Completions + function calling; `max_completion_tokens`; no `temperature` (reasoning-model friendly). |
+| **Anthropic** | `providers/anthropic.py` | Messages API via streaming (safe for large `max_tokens`); default `claude-opus-4-8`. Sends `thinking: {type: adaptive}` (Opus 4.8 does not reason without it) + `output_config.effort`; no `temperature` (removed on Opus 4.8). |
+| **OpenAI** | `providers/openai.py` | Chat Completions + function calling; `max_completion_tokens` + `reasoning_effort`; no `temperature` (reasoning-model friendly). |
 | **Kimi / Moonshot** | `providers/kimi.py` | Kimi K3 via Moonshot's OpenAI-compatible API — reuses the OpenAI translation, swapping only the endpoint (`MOONSHOT_API_KEY`) and the legacy `max_tokens` param. |
+| **`anthropic-gateway` / `openai-gateway`** | same adapters | Same wire protocol and model, reached through a subscription-replaying proxy (`ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`). Billing differs — a flat subscription, not per-token — so these keys are **absent from the price table and report `usd: null`** rather than pricing a run off dollars that were never charged. Each refuses to construct without its `*_BASE_URL`, so a gateway run can never silently reach a first-party endpoint. |
 
 Each adapter validates its model at startup and never silently falls back to another provider — audit results and costs stay reproducible.
 
@@ -331,7 +351,7 @@ pramana/
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
 └── eval/
-    ├── datasets/       # the corpus (9 vulnerable fixtures / 11 known bugs / 9 classes + 1 negative control)
+    ├── datasets/       # the corpus (9 vulnerable fixtures / 14 known bugs / 11 classes + 1 negative control)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     ├── harness.py      # runs audit() over fixtures, counts true positives
@@ -339,7 +359,7 @@ pramana/
     └── refutation.py   # puts hand-written claims to the verifier, bypassing the finder
 baselines/              # recorded baselines + the agent's audit reports
 baselines/phase-0/      # the recorded Phase 0 baseline + the agent's audit reports
-tests/                  # 131 offline tests (parsing, grading, isolation, tool scope, refutation probe, corpus integrity)
+tests/                  # 271 offline tests (parsing, grading, isolation, tool scope, refusal handling, severity cap, corpus integrity)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -349,12 +369,12 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 131 offline tests, no network/keys
+uv run pytest                      # 271 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```
 
-Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching), the grading paths (a non-passing PoC or wrong class never counts), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for all three labs, env validation, baseline aggregation over disagreeing runs, and the negative control's own integrity — including replaying the real exploit against the patched twin to prove it fails. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Tests cover boundary JSON parsing, vulnerability-class matching (including multi-bug 1:1 matching and specificity-based label resolution), the grading paths (a non-passing PoC or wrong class never counts), the deployment-contingent severity cap (a mutation check fails the suite if the cap is removed from the pipeline), the Foundry runner's transient-failure retries, the canonical↔provider wire translation for every lab, refusal handling (a model that declines at its safety layer is recorded as a refusal, not a parse error), gateway-vs-first-party pricing (a gateway key may never enter the price table), env validation, baseline aggregation over disagreeing runs, and the negative control's own integrity — including replaying the real exploit against the patched twin to prove it fails. CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ---
 
@@ -363,9 +383,9 @@ Tests cover boundary JSON parsing, vulnerability-class matching (including multi
 Pramana is built as a **vertical slice first**, deepening before it widens — every phase is a refactor of a working, demoable system, never a rewrite. Full plan in [`docs/design.md`](docs/design.md).
 
 - **Phase 0 — Vertical slice** ✅ — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus. [Baseline](baselines/phase-0/).
-- **Phase 1 — Split the verifier** ✅ *(current)* — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis. Gated against the [Phase 0 baseline](baselines/phase-0/) and recorded as its own [Phase 1 baseline](baselines/phase-1/).
-- **Phase 2 — Add the reporter + routing** — a third agent that writes the deliverable (and, seeing every verdict at once, is the natural place to catch cross-finding duplicates); per-role model routing swept by the harness; Slither/compile caching.
-- **Phase 3 — Scale & harden** — public benchmarks, a full paired vulnerable/patched set, structured observability, and cost-per-role reporting.
+- **Phase 1 — Split the verifier** ✅ — a context-isolated verifier that sees only the bare claim (not the finder's reasoning), so verification can't be biased by the hypothesis. Gated against the [Phase 0 baseline](baselines/phase-0/) and recorded as the [Phase 1 gate reference](baselines/phase-1-8693741ffa57/).
+- **Phase 2 — Routing + governance** 🚧 *(current)* — the [four-model sweep](#a-four-model-sweep) (per-role routing, priced per role) and its subscription-proxy gateways; a **deployment-contingent severity cap** so a bug that needs a misconfigured deploy can't outrank an attacker-reachable one; and the corpus expansion the sweep surfaced. Still ahead: the **reporter** agent (Nirnaya) that writes the deliverable and — seeing every verdict at once — is the natural place to catch cross-finding duplicates; Slither/compile caching.
+- **Phase 3 — Scale & harden** — public benchmarks (Code4rena / Sherlock / DeFiHackLabs), a full paired vulnerable/patched set, and structured observability.
 
 The three agents have fixed identities — **Anumana** (finder / inference), **Khandana** (verifier / refutation), **Nirnaya** (reporter / conclusion) — the three *pramāṇas* by which a finding becomes proven knowledge.
 

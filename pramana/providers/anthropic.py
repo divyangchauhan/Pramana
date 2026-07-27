@@ -23,6 +23,7 @@ from .base import (
     LLMResponse,
     Message,
     ProviderError,
+    ProviderRefusalError,
     ToolCall,
     ToolSchema,
 )
@@ -169,6 +170,15 @@ class AnthropicAdapter:
             )
         except self._anthropic.APIError as exc:
             raise ProviderError(f"{self.provider} request failed: {exc}") from exc
+
+        # The call succeeded but the model declined at its safety layer: empty
+        # content, stop_reason "refusal". Surface it as a refusal rather than
+        # letting the empty text fall through to a misleading parse error.
+        if getattr(message, "stop_reason", None) == "refusal":
+            raise ProviderRefusalError(
+                f"{self.provider}:{model} refused the request "
+                "(stop_reason=refusal); the model declined to answer"
+            )
 
         return self._from_wire(message)
 

@@ -23,6 +23,7 @@ from .base import (
     LLMResponse,
     Message,
     ProviderError,
+    ProviderRefusalError,
     ToolCall,
     ToolSchema,
 )
@@ -170,6 +171,19 @@ class OpenAIAdapter:
             )
         except self._openai.APIError as exc:
             raise ProviderError(f"{self.provider} request failed: {exc}") from exc
+
+        # The call succeeded but the model (or the moderation layer) declined:
+        # finish_reason "content_filter", or a structured `refusal` on the
+        # message. Name it a refusal rather than letting the empty content fall
+        # through to a misleading parse error downstream.
+        choice = resp.choices[0]
+        refusal = getattr(getattr(choice, "message", None), "refusal", None)
+        if choice.finish_reason == "content_filter" or refusal:
+            detail = refusal or "finish_reason=content_filter"
+            raise ProviderRefusalError(
+                f"{self.provider}:{model} refused the request ({detail}); "
+                "the model declined to answer"
+            )
 
         return self._from_wire(resp)
 

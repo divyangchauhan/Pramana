@@ -16,7 +16,12 @@ from pramana import config
 from pramana.agents.prompts import READ_FILE_SCHEMA
 from pramana.providers import CapabilityError, build_adapter
 from pramana.providers.anthropic import AnthropicAdapter
-from pramana.providers.base import ProviderError, ToolCall, ToolResult
+from pramana.providers.base import (
+    ProviderError,
+    ProviderRefusalError,
+    ToolCall,
+    ToolResult,
+)
 from pramana.providers.kimi import KimiAdapter
 from pramana.providers.openai import OpenAIAdapter
 
@@ -314,3 +319,109 @@ def test_capability_check_does_not_block_when_neither_endpoint_is_available():
     the first real request surfaces the truth instead."""
     models = _FakeModels(retrieve_404=True, listed=None, list_500=True)
     _adapter_with(models).check_capabilities("whatever")  # must not raise
+
+
+# --- Refusals: a model declining is named a refusal, not a parse error --------
+#
+# A safety refusal comes back as a SUCCESSFUL call with empty content
+# (Anthropic stop_reason "refusal"; OpenAI finish_reason "content_filter" or a
+# structured `refusal` message). Unhandled, that empty content falls through to
+# the finder's JSON parser and surfaces as a misleading OutputParseError —
+# blaming the pipeline for the model's own decline. Both adapters must name it,
+# so a cross-model sweep can tell "this model refused the task" apart from a
+# real bug (claude-fable-5 refuses the finder task; Opus runs it cleanly).
+
+
+class _FakeAPIError(Exception):
+    pass
+
+
+def _complete_kwargs() -> dict[str, Any]:
+    return dict(
+        model="test-model",
+        system="s",
+        tools=[],
+        messages=[{"role": "user", "content": "audit this"}],
+        max_tokens=128,
+        effort="medium",
+    )
+
+
+def _anthropic_adapter_returning(message: SimpleNamespace) -> AnthropicAdapter:
+    class _Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def get_final_message(self):
+            return message
+
+    class _Messages:
+        def stream(self, **kwargs):
+            return _Stream()
+
+    adapter = AnthropicAdapter.__new__(AnthropicAdapter)  # bypass client construction
+    stub = cast(Any, adapter)
+    stub._anthropic = SimpleNamespace(APIError=_FakeAPIError)
+    stub._client = SimpleNamespace(messages=_Messages())
+    return adapter
+
+
+def test_anthropic_complete_raises_on_refusal():
+    msg = SimpleNamespace(
+        stop_reason="refusal",
+        content=[],
+        usage=SimpleNamespace(input_tokens=1753, output_tokens=9),
+    )
+    with pytest.raises(ProviderRefusalError, match="refused"):
+        _anthropic_adapter_returning(msg).complete(**_complete_kwargs())
+
+
+def test_anthropic_complete_returns_normally_when_not_refused():
+    msg = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text="[]")],
+        usage=SimpleNamespace(input_tokens=10, output_tokens=2),
+    )
+    assert _anthropic_adapter_returning(msg).complete(**_complete_kwargs()).text == "[]"
+
+
+def _openai_adapter_returning(resp: SimpleNamespace) -> OpenAIAdapter:
+    class _Completions:
+        def create(self, **kwargs):
+            return resp
+
+    adapter = OpenAIAdapter.__new__(OpenAIAdapter)  # bypass client construction
+    stub = cast(Any, adapter)
+    stub._openai = SimpleNamespace(APIError=_FakeAPIError)
+    stub._client = SimpleNamespace(chat=SimpleNamespace(completions=_Completions()))
+    return adapter
+
+
+def _openai_resp(
+    *, finish_reason: str, refusal: str | None = None, content: str = ""
+) -> SimpleNamespace:
+    message = SimpleNamespace(content=content, refusal=refusal, tool_calls=[])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason=finish_reason)],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=0),
+    )
+
+
+def test_openai_complete_raises_on_content_filter():
+    resp = _openai_resp(finish_reason="content_filter")
+    with pytest.raises(ProviderRefusalError, match="refused"):
+        _openai_adapter_returning(resp).complete(**_complete_kwargs())
+
+
+def test_openai_complete_raises_on_structured_refusal():
+    resp = _openai_resp(finish_reason="stop", refusal="I can't help with that.")
+    with pytest.raises(ProviderRefusalError, match="can't help"):
+        _openai_adapter_returning(resp).complete(**_complete_kwargs())
+
+
+def test_openai_complete_returns_normally_when_not_refused():
+    resp = _openai_resp(finish_reason="stop", content="[]")
+    assert _openai_adapter_returning(resp).complete(**_complete_kwargs()).text == "[]"
