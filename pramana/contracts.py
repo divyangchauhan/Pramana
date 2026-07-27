@@ -89,6 +89,40 @@ class Phase0Output(BaseModel):
     report_markdown: str = ""
 
 
+class ReportEntry(BaseModel):
+    """Reporter (Nirnaya) → deliverable. The reporter's *judgment only*.
+
+    Deliberately carries no severity, PoC path, verdict, or count: those are
+    established by the verifier and owned by the orchestrator, and the renderer
+    weaves this prose into a governed skeleton built from the verdicts (design
+    §3.3). This is the same discipline as :meth:`Verdict.capped` — the model
+    contributes prose, not the facts the report is scored on — so a reporter
+    that hallucinated a severity or dropped a finding cannot corrupt the record.
+
+    ``duplicate_of`` is the one structural claim the reporter *is* allowed to
+    make, because it is the only agent that sees every confirmed finding at
+    once (each verifier saw one claim in isolation). It annotates, it does not
+    delete: the referenced finding still appears and still counts.
+    """
+
+    finding_id: str
+    description: str = ""
+    impact: str = ""
+    remediation: str = ""
+    duplicate_of: str | None = None
+
+
+class ReporterOutput(BaseModel):
+    """Nirnaya's final JSON payload: an optional executive summary plus one
+    prose entry per finding, keyed by ``finding_id`` for the renderer to weave
+    in. Every field defaults, so a reporter that returns only a summary, or only
+    entries, is still valid — a missing entry simply falls back to the governed
+    facts alone."""
+
+    summary: str = ""
+    entries: list[ReportEntry] = Field(default_factory=list)
+
+
 class OutputParseError(ValueError):
     """Raised when an agent's final message is not valid JSON for its contract."""
 
@@ -239,6 +273,32 @@ def parse_verdict(text: str) -> Verdict:
             f"verifier output failed schema validation: {last_error}"
         ) from last_error
     raise OutputParseError("no JSON verdict object found in verifier output")
+
+
+def parse_reporter_output(text: str) -> ReporterOutput:
+    """Reporter boundary: an object with ``summary`` and/or ``entries``.
+
+    Both fields default, so — like :func:`parse_phase0_output` — *any* JSON
+    object would validate, including a stray one from prose. Candidates are
+    therefore filtered on carrying at least one of the contract's own keys
+    before validation, so a bracketed aside in the summary cannot be mistaken
+    for the payload.
+    """
+    candidates = [v for v in _json_candidates(text) if isinstance(v, dict)]
+    payloads = [v for v in candidates if {"summary", "entries"} & set(v)]
+
+    last_error: ValidationError | None = None
+    for value in payloads:
+        try:
+            return ReporterOutput.model_validate(value)
+        except ValidationError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise OutputParseError(
+            f"reporter output failed schema validation: {last_error}"
+        ) from last_error
+    raise OutputParseError("no JSON reporter object found in reporter output")
 
 
 def parse_phase0_output(text: str) -> Phase0Output:

@@ -24,6 +24,7 @@ from typing import Any
 from .agents.finder import FINDER_SYS, FINDER_TOOLS
 from .agents.loop import TraceFn, run_agent, spent_on
 from .agents.prompts import PHASE0_SYS, PHASE0_TOOLS
+from .agents.reporter import REPORTER_SYS, REPORTER_TOOLS, build_reporter_seed
 from .agents.verifier import VERIFIER_SYS, VERIFIER_TOOLS, build_verifier_seed
 from .config import AgentConfig
 from .contracts import (
@@ -32,10 +33,13 @@ from .contracts import (
     OutputParseError,
     Phase0Finding,
     Phase0Output,
+    ReportEntry,
+    ReporterOutput,
     Verdict,
     bare_claim,
     parse_findings,
     parse_phase0_output,
+    parse_reporter_output,
     parse_verdict,
 )
 from .cost import Usage, model_key
@@ -284,18 +288,36 @@ def verify_finding(
     return verdict, budget.used, run.usage
 
 
-def _render_report(findings: dict[str, Finding], verdicts: list[Verdict]) -> str:
-    """Deterministic report synthesis.
+def _render_report(
+    findings: dict[str, Finding],
+    verdicts: list[Verdict],
+    reporter: ReporterOutput | None = None,
+) -> str:
+    """Render the deliverable from the verdicts, over a *governed* skeleton.
 
-    Phase 1 has no reporter agent yet (design §10 puts it in Phase 2), so the
-    deliverable is assembled in Python from the verdicts. Refuted findings are
-    omitted from the report but retained in the eval data (design §3.3).
+    The structure, the severities, the PoC paths and the counts come from the
+    verdicts, never from the model — this is the same discipline as
+    :meth:`Verdict.capped`. When ``reporter`` is supplied (Phase 2, Nirnaya),
+    the model's prose (description, impact, remediation, executive summary,
+    duplicate links) is *woven into* that skeleton, keyed by finding id; it can
+    enrich a finding but cannot move a severity, drop a finding, or change a
+    count. With ``reporter=None`` this is the deterministic Phase 1 report,
+    unchanged. Refuted findings are omitted here but retained in the eval data
+    (design §3.3).
     """
+    entries = {e.finding_id: e for e in reporter.entries} if reporter else {}
+    confirmed_ids = {v.finding_id for v in verdicts if v.verdict == "confirmed"}
+
+    def _entry(finding_id: str) -> ReportEntry | None:
+        return entries.get(finding_id)
+
     confirmed = [v for v in verdicts if v.verdict == "confirmed"]
     review = [v for v in verdicts if v.verdict == "inconclusive"]
     refuted = [v for v in verdicts if v.verdict == "refuted"]
 
     lines = ["# Audit report", ""]
+    if reporter and reporter.summary.strip():
+        lines += [reporter.summary.strip(), ""]
     lines.append(
         f"{len(confirmed)} confirmed finding(s) proven with an executable PoC; "
         f"{len(review)} needing human review; {len(refuted)} claim(s) refuted by the verifier."
@@ -308,13 +330,24 @@ def _render_report(findings: dict[str, Finding], verdicts: list[Verdict]) -> str
         lines += ["None. No claim was proven with a passing proof-of-concept exploit.", ""]
     for v in confirmed:
         f = findings[v.finding_id]
+        e = _entry(v.finding_id)
+        lines += [f"### {f.id} — {f.vuln_class} ({v.severity or 'unrated'})", ""]
+        # Duplicate links are the reporter's one structural call — but only when
+        # they point at another *confirmed* finding, never at itself.
+        if e and e.duplicate_of and e.duplicate_of in confirmed_ids and e.duplicate_of != f.id:
+            lines += [
+                f"> Same root cause as **{e.duplicate_of}** — one fix resolves both.",
+                "",
+            ]
+        if e and e.description.strip():
+            lines += [e.description.strip(), ""]
         lines += [
-            f"### {f.id} — {f.vuln_class} ({v.severity or 'unrated'})",
-            "",
             f"- **Contract:** `{f.contract}`",
             f"- **Location:** {f.location}",
-            f"- **Hypothesis:** {f.hypothesis}",
         ]
+        if e and e.impact.strip():
+            lines.append(f"- **Impact:** {e.impact.strip()}")
+        lines.append(f"- **Hypothesis:** {f.hypothesis}")
         if v.deployment_contingent:
             # Stated on the finding itself, not buried in evidence: a reader
             # scanning severities must see that this one needed a bad deploy.
@@ -326,19 +359,27 @@ def _render_report(findings: dict[str, Finding], verdicts: list[Verdict]) -> str
         lines += [
             f"- **PoC:** `{v.poc_path}` (proven in {v.attempts} executed forge run(s))",
             f"- **Evidence:** {v.evidence or '(none recorded)'}",
-            "",
         ]
+        if e and e.remediation.strip():
+            lines.append(f"- **Remediation:** {e.remediation.strip()}")
+        lines.append("")
 
     lines += ["## Needs human review", ""]
     if not review:
         lines += ["None.", ""]
     for v in review:
         f = findings[v.finding_id]
+        e = _entry(v.finding_id)
+        lines += [f"### {f.id} — {f.vuln_class} (unverified)", ""]
+        if e and e.description.strip():
+            lines += [e.description.strip(), ""]
         lines += [
-            f"### {f.id} — {f.vuln_class} (unverified)",
-            "",
             f"- **Contract:** `{f.contract}`",
             f"- **Location:** {f.location}",
+        ]
+        if e and e.impact.strip():
+            lines.append(f"- **Impact (unverified):** {e.impact.strip()}")
+        lines += [
             f"- **Hypothesis:** {f.hypothesis}",
             f"- **Finder severity guess:** {f.severity_guess or 'none'} "
             "*(unverified — not an authoritative grade)*",
@@ -465,9 +506,127 @@ def audit_phase1(
     )
 
 
+# --- Phase 2: finder -> verifier -> reporter ---------------------------------
+
+
+def _reporter_lists(
+    by_id: dict[str, Finding], verdicts: list[Verdict]
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """The two governed lists the reporter is seeded with (design §3.3).
+
+    Confirmed and needs-review only; refuted findings never reach the reporter.
+    Severity and PoC path are included for context — so the prose can be
+    accurate — but the reporter returns none of them, and the renderer takes
+    them from the verdicts, not from the reporter's answer.
+    """
+    confirmed: list[dict[str, object]] = []
+    needs_review: list[dict[str, object]] = []
+    for v in verdicts:
+        f = by_id[v.finding_id]
+        if v.verdict == "confirmed":
+            confirmed.append(
+                {
+                    "finding_id": v.finding_id,
+                    "vuln_class": f.vuln_class,
+                    "contract": f.contract,
+                    "location": f.location,
+                    "severity": v.severity,
+                    "deployment_contingent": v.deployment_contingent,
+                    "hypothesis": f.hypothesis,
+                    "evidence": v.evidence,
+                    "poc_path": v.poc_path,
+                }
+            )
+        elif v.verdict == "inconclusive":
+            needs_review.append(
+                {
+                    "finding_id": v.finding_id,
+                    "vuln_class": f.vuln_class,
+                    "contract": f.contract,
+                    "location": f.location,
+                    "severity_guess_unverified": f.severity_guess,
+                    "hypothesis": f.hypothesis,
+                    "attempts": v.attempts,
+                    "evidence": v.evidence,
+                }
+            )
+    return confirmed, needs_review
+
+
+def audit_phase2(
+    adapters: Mapping[str, LLMAdapter],
+    config: AgentConfig,
+    ctx: ToolContext,
+    contract_path: str,
+    *,
+    trace: TraceFn | None = None,
+) -> AuditResult:
+    """Finder -> verifier -> reporter (Nirnaya writes the deliverable, design §3.3).
+
+    The verifier's verdicts are the ground truth; the reporter only synthesizes
+    them into a client-facing report. So Phase 2 *is* Phase 1 plus one synthesis
+    pass — the finder/verifier half is identical, which keeps the phase1-vs-phase2
+    comparison honest (the only variable is the deliverable).
+    """
+    result = audit_phase1(adapters, config, ctx, contract_path, trace=trace)
+
+    reporter_profile = config.role("reporter")
+    reporter_key = model_key(reporter_profile.provider, reporter_profile.model)
+    reporter_usage = Usage()
+
+    by_id = {f.id: f for f in result.findings}
+    confirmed, needs_review = _reporter_lists(by_id, result.verdicts)
+
+    # Nothing to write about — keep the (empty) deterministic report and record a
+    # zero-cost reporter slot, so a clean contract still reports the role ran.
+    if not confirmed and not needs_review:
+        result.usage = {**result.usage, "reporter": (reporter_key, reporter_usage)}
+        return result
+
+    try:
+        run = run_agent(
+            adapters[reporter_profile.provider],
+            REPORTER_SYS,
+            REPORTER_TOOLS,
+            {},  # the reporter has no tools
+            seed=build_reporter_seed(confirmed, needs_review),
+            model=reporter_profile.model,
+            max_turns=config.max_turns,
+            max_tokens=config.max_tokens,
+            max_output_chars=ctx.max_output_chars,
+            effort=config.effort,
+            trace=_role_trace(trace, "reporter"),
+        )
+    except Exception as exc:
+        # A transport failure or a refusal (ProviderRefusalError) is a real
+        # failure, attributed to the reporter with the spend it incurred — the
+        # finder/verifier spend is already on result.usage.
+        reporter_usage += spent_on(exc)
+        raise PipelineError(
+            f"{type(exc).__name__}: {exc}",
+            {**result.usage, "reporter": (reporter_key, reporter_usage)},
+        ) from exc
+    reporter_usage = run.usage
+
+    try:
+        reporter_output = parse_reporter_output(run.text)
+        report_md = _render_report(by_id, result.verdicts, reporter_output)
+    except OutputParseError:
+        # The model answered but we cannot read it. The verdicts are already
+        # proven, so fall back to the governed deterministic report rather than
+        # losing the deliverable — the same fail-safe posture as the verifier's
+        # inconclusive default.
+        report_md = _render_report(by_id, result.verdicts)
+
+    result.output = result.output.model_copy(update={"report_markdown": report_md})
+    result.usage = {**result.usage, "reporter": (reporter_key, reporter_usage)}
+    return result
+
+
 PIPELINES: dict[str, str] = {
     "phase0": "single combined agent (find -> prove -> report inline)",
     "phase1": "finder -> context-isolated verifier",
+    "phase2": "finder -> context-isolated verifier -> reporter (deliverable)",
 }
 
 
@@ -487,6 +646,7 @@ __all__ = [
     "audit",
     "audit_phase0",
     "audit_phase1",
+    "audit_phase2",
     "verify_finding",
     "result_summary",
 ]
