@@ -367,6 +367,7 @@ def run_agent_eval(
     forge_retries: int = 2,
     verbose: bool = False,
     pipeline: str = "phase0",
+    slither_cache_dir: Path | None = None,
 ) -> list[FixtureRow]:
     from ..pipeline import (  # local import: needs a provider SDK
         audit_phase0,
@@ -395,7 +396,10 @@ def run_agent_eval(
         audit_ws = work_root / fx.name / "audit"
         build_workspace(fx, audit_ws)
         ctx = ToolContext(
-            workspace=audit_ws, forge_timeout=forge_timeout, forge_retries=forge_retries
+            workspace=audit_ws,
+            forge_timeout=forge_timeout,
+            forge_retries=forge_retries,
+            slither_cache_dir=slither_cache_dir,
         )
         trace: TraceFn | None = None
         if verbose:
@@ -660,6 +664,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--forge-timeout", type=int, default=300)
     parser.add_argument("--forge-retries", type=int, default=2,
                         help="retries for transient forge/anvil flakiness (default 2)")
+    parser.add_argument("--slither-cache-dir", type=Path, default=Path(".cache/slither"),
+                        help="content cache for Slither output, reused across runs "
+                             "(default .cache/slither)")
+    parser.add_argument("--no-slither-cache", action="store_true",
+                        help="disable the Slither result cache (clean-room timing)")
     parser.add_argument("--max-turns", type=int, default=25)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--json", type=Path, help="write full results JSON here")
@@ -720,6 +729,7 @@ def main(argv: list[str] | None = None) -> int:
                 forge_retries=args.forge_retries,
                 verbose=args.verbose,
                 pipeline=args.pipeline,
+                slither_cache_dir=None if args.no_slither_cache else args.slither_cache_dir,
             )
         except Exception as exc:  # provider setup / auth / capability failure
             print(f"error: could not start {config.label(args.pipeline)} run: {exc}",
