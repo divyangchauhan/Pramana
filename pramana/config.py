@@ -66,9 +66,11 @@ class AgentConfig:
     """Everything a pipeline needs to run one audit, reproducibly.
 
     ``agent`` is the single combined finder+verifier+reporter of the Phase 0
-    vertical slice. ``finder`` and ``verifier`` route those roles independently
-    in Phase 1; when unset they fall back to ``agent``, so a single ``--model``
-    still configures the whole pipeline.
+    vertical slice. ``finder``, ``verifier`` and ``reporter`` route those roles
+    independently in the split pipelines; when unset they fall back to ``agent``,
+    so a single ``--model`` still configures the whole pipeline. The reporter is
+    the cheap synthesis slot (design §3.3), so it is the natural one to route to
+    a smaller model while the finder and verifier keep the strong one.
 
     ``max_turns`` bounds model round-trips (reliability guard); ``max_tokens``
     is the per-turn output cap. ``max_poc_attempts`` bounds *executed forge
@@ -79,6 +81,7 @@ class AgentConfig:
     agent: ModelProfile
     finder: ModelProfile | None = None
     verifier: ModelProfile | None = None
+    reporter: ModelProfile | None = None
     max_turns: int = 25
     max_tokens: int = 16000
     max_poc_attempts: int = 4
@@ -114,6 +117,14 @@ class AgentConfig:
         if pipeline == "phase0":
             return f"phase0/{self.agent.label()}{suffix}"
         finder, verifier = self.role("finder"), self.role("verifier")
+        if pipeline == "phase2":
+            reporter = self.role("reporter")
+            if finder == verifier == reporter:
+                return f"phase2/{finder.label()}{suffix}"
+            return (
+                f"phase2/finder={finder.label()},verifier={verifier.label()},"
+                f"reporter={reporter.label()}{suffix}"
+            )
         if finder == verifier:
             return f"{pipeline}/{finder.label()}{suffix}"
         return f"{pipeline}/finder={finder.label()},verifier={verifier.label()}{suffix}"
@@ -126,6 +137,7 @@ class AgentConfig:
         *,
         finder_model: str | None = None,
         verifier_model: str | None = None,
+        reporter_model: str | None = None,
         **kwargs: object,
     ) -> AgentConfig:
         resolved = model or DEFAULT_MODELS[provider]
@@ -134,6 +146,9 @@ class AgentConfig:
             finder=ModelProfile(provider=provider, model=finder_model) if finder_model else None,
             verifier=(
                 ModelProfile(provider=provider, model=verifier_model) if verifier_model else None
+            ),
+            reporter=(
+                ModelProfile(provider=provider, model=reporter_model) if reporter_model else None
             ),
             **kwargs,  # type: ignore[arg-type]
         )

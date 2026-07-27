@@ -368,15 +368,22 @@ def run_agent_eval(
     verbose: bool = False,
     pipeline: str = "phase0",
 ) -> list[FixtureRow]:
-    from ..pipeline import audit_phase0, audit_phase1  # local import: needs a provider SDK
+    from ..pipeline import (  # local import: needs a provider SDK
+        audit_phase0,
+        audit_phase1,
+        audit_phase2,
+    )
 
     label = config.label(pipeline)
 
     # One adapter per distinct provider in the routing table, checked up front
     # so a bad model id fails before any fixture is run.
-    profiles = (
-        [config.agent] if pipeline == "phase0" else [config.role("finder"), config.role("verifier")]
-    )
+    if pipeline == "phase0":
+        profiles = [config.agent]
+    elif pipeline == "phase2":
+        profiles = [config.role("finder"), config.role("verifier"), config.role("reporter")]
+    else:
+        profiles = [config.role("finder"), config.role("verifier")]
     adapters = {}
     for profile in profiles:
         adapter = adapters.get(profile.provider) or build_adapter(profile.provider)
@@ -400,6 +407,8 @@ def run_agent_eval(
                 result = audit_phase0(
                     adapters[config.agent.provider], config, ctx, fx.contract, trace=trace
                 )
+            elif pipeline == "phase2":
+                result = audit_phase2(adapters, config, ctx, fx.contract, trace=trace)
             else:
                 result = audit_phase1(adapters, config, ctx, fx.contract, trace=trace)
         except Exception as exc:  # keep the sweep going; record the failure
@@ -628,11 +637,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", choices=list(SUPPORTED_PROVIDERS),
                         help="LLM provider for a real agent run")
     parser.add_argument("--model", help="override the model id for the provider")
-    parser.add_argument("--pipeline", choices=["phase0", "phase1"], default="phase1",
+    parser.add_argument("--pipeline", choices=["phase0", "phase1", "phase2"], default="phase1",
                         help="phase0: one combined agent; phase1: finder -> isolated "
-                             "verifier (default)")
-    parser.add_argument("--finder-model", help="route the finder to a different model (phase1)")
-    parser.add_argument("--verifier-model", help="route the verifier to a different model (phase1)")
+                             "verifier (default); phase2: adds the reporter (Nirnaya) "
+                             "that writes the deliverable")
+    parser.add_argument("--finder-model", help="route the finder to a different model (phase1/2)")
+    parser.add_argument("--verifier-model",
+                        help="route the verifier to a different model (phase1/2)")
+    parser.add_argument("--reporter-model",
+                        help="route the reporter to a different model (phase2); the cheap "
+                             "synthesis slot, so the natural one to route to a smaller model")
     parser.add_argument("--effort", choices=list(EFFORT_LEVELS),
                         help="reasoning depth for every role. Leaving this unset is NOT "
                              "neutral: provider defaults differ (anthropic high, openai "
@@ -691,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
             args.model,
             finder_model=args.finder_model,
             verifier_model=args.verifier_model,
+            reporter_model=args.reporter_model,
             max_turns=args.max_turns,
             max_tokens=args.max_tokens,
             max_poc_attempts=args.max_poc_attempts,
