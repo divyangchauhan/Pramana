@@ -244,7 +244,62 @@ def test_matching_fingerprints_are_neither_mismatched_nor_unverified(tmp_path):
     c = compare(aggregate([runs[1]], "Phase 1"), aggregate([runs[0]], "Phase 0"))
     assert c["corpus_mismatch"] is False
     assert c["corpus_unverified"] is False
-    assert "could not be confirmed" not in render_comparison(c)
+    assert "predates corpus fingerprinting" not in render_comparison(c)
+
+
+# --- grading rules, pinned separately from the corpus -------------------------
+
+
+def _with(path: Path, **fields) -> Path:
+    path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
+    return path
+
+
+def test_a_gate_across_grader_versions_is_flagged_but_not_failed(tmp_path):
+    """Identical agent output scores differently under different rules, so the
+    verdict deserves a caveat. Not fatal: a grader fix can only raise a score,
+    so it cannot manufacture a false pass, and blocking every gate until the
+    baseline is recaptured would cost more than it protects."""
+    old = _with(_run(tmp_path, "o1.json", [_row("a", 1, 1)]), grader_version=1)
+    new = _with(_run(tmp_path, "n1.json", [_row("a", 1, 1)]), grader_version=2)
+
+    c = compare(aggregate([new], "Phase 1"), aggregate([old], "Phase 0"))
+    assert c["grader_mismatch"] is True
+    assert c["passed"] is True
+    assert "different rules" in render_comparison(c)
+
+
+def test_the_same_grader_version_raises_no_caveat(tmp_path):
+    runs = [
+        _with(_run(tmp_path, name, [_row("a", 1, 1)]), grader_version=2)
+        for name in ("o1.json", "n1.json")
+    ]
+    c = compare(aggregate([runs[1]], "Phase 1"), aggregate([runs[0]], "Phase 0"))
+    assert c["grader_mismatch"] is False
+    assert c["grader_unverified"] is False
+    assert "different rules" not in render_comparison(c)
+
+
+def test_a_baseline_predating_grader_versioning_says_so(tmp_path):
+    """The existing Phase 1 reference was recorded before versioning existed.
+    Silence would imply its rules had been checked against the candidate's."""
+    old = _run(tmp_path, "o1.json", [_row("a", 1, 1)])  # no grader_version
+    new = _with(_run(tmp_path, "n1.json", [_row("a", 1, 1)]), grader_version=2)
+
+    c = compare(aggregate([new], "Phase 1"), aggregate([old], "Phase 0"))
+    assert c["grader_mismatch"] is False
+    assert c["grader_unverified"] is True
+    assert "predates grader versioning" in render_comparison(c)
+
+
+def test_aggregate_refuses_to_mix_runs_graded_differently(tmp_path):
+    """Same argument as mixing corpora: the runs measure different things, so
+    their floor and ceiling describe nothing in particular."""
+    a = _with(_run(tmp_path, "a.json", [_row("a", 1, 1)]), grader_version=1)
+    b = _with(_run(tmp_path, "b.json", [_row("a", 1, 1)]), grader_version=2)
+
+    with pytest.raises(SystemExit, match="different grader versions"):
+        aggregate([a, b], "Phase 1")
 
 
 def test_aggregate_refuses_to_mix_runs_from_different_corpora(tmp_path):

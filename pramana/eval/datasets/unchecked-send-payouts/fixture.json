@@ -9,6 +9,13 @@
       "vuln_class": "unchecked-call",
       "location": "Payouts.payout()",
       "description": "The return value of `send` is discarded. A recipient that cannot accept ETH causes the transfer to fail silently after the claim has already been zeroed, stranding the funds and destroying the recipient's entitlement."
+    },
+    {
+      "id": "KB-2",
+      "vuln_class": "missing-zero-check",
+      "location": "Payouts.credit() / payout()",
+      "description": "Neither credit nor payout rejects the zero address. Value credited to address(0) can be paid out to address(0) — send succeeds to an empty account — so the ETH leaves the contract to an address no one controls and is irrecoverably burned while the ledger entry is cleared.",
+      "reference_poc": "reference/ZeroAddressBurnExploit.t.sol"
     }
   ]
 }

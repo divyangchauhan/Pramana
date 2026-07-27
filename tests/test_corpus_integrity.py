@@ -130,6 +130,48 @@ def test_known_bug_classes_normalize_to_themselves():
             )
 
 
+def test_accepted_aliases_normalize_to_themselves():
+    """Same rule as vuln_class: an alias the harness re-canonicalizes to
+    something else does not accept what its author thought it did."""
+    from pramana.eval.harness import normalize_vuln_class
+
+    for fixture in load_fixtures():
+        for bug in fixture.known_bugs:
+            for alias in bug.accepts:
+                assert normalize_vuln_class(alias) == alias, (
+                    f"{fixture.name}/{bug.id}: alias {alias!r} normalizes to "
+                    f"{normalize_vuln_class(alias)!r} — declare it canonically"
+                )
+
+
+def test_no_alias_collides_with_a_sibling_bugs_own_class():
+    """The failure aliases exist to avoid causing.
+
+    If bug A accepts a class that bug B *is*, one finding can satisfy either.
+    Matching prefers the primary class, so the total stays right — but a fixture
+    written that way has two bugs the grader cannot tell apart, and a model that
+    found one would look like it found whichever the harness picked. Keep the
+    classes within a fixture mutually exclusive.
+    """
+    for fixture in load_fixtures():
+        primary = {bug.id: bug.vuln_class for bug in fixture.known_bugs}
+        for bug in fixture.known_bugs:
+            for alias in bug.accepts:
+                clashing = [i for i, c in primary.items() if i != bug.id and c == alias]
+                assert not clashing, (
+                    f"{fixture.name}/{bug.id} accepts {alias!r}, which is the class of "
+                    f"{', '.join(clashing)} in the same fixture"
+                )
+
+
+def test_a_bug_does_not_list_its_own_class_as_an_alias():
+    """Redundant, and it hides whether a match was a real agreement on naming
+    or an alias rescue — the distinction `matched_via_alias` records."""
+    for fixture in load_fixtures():
+        for bug in fixture.known_bugs:
+            assert bug.vuln_class not in bug.accepts, f"{fixture.name}/{bug.id}"
+
+
 def test_reference_poc_names_avoid_the_testfail_prefix():
     """Foundry reads a `testFail` prefix as 'expected to revert', which silently
     inverts a reference exploit's result."""

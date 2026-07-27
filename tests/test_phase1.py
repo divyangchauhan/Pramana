@@ -294,7 +294,9 @@ class ScriptedAdapter:
     def check_capabilities(self, model: str) -> None:  # pragma: no cover - trivial
         return None
 
-    def complete(self, *, model, system, tools, messages, max_tokens) -> LLMResponse:
+    def complete(
+        self, *, model, system, tools, messages, max_tokens, effort=None
+    ) -> LLMResponse:
         self.seen.append(
             {
                 "system": system,
@@ -402,6 +404,39 @@ def test_audit_phase1_records_the_model_each_role_actually_used(tmp_path, monkey
     assert result.usage["verifier"][0] == "anthropic:verifier-model"
 
 
+def test_audit_phase1_caps_a_deployment_contingent_verdict(tmp_path, monkeypatch):
+    """The unit tests cover Verdict.capped(); this pins that the pipeline
+    actually calls it. Without this, deleting that line leaves every other test
+    green while uncapped severities reach the report."""
+    monkeypatch.setattr("pramana.pipeline._ground", lambda ctx, path: "(slither stub)")
+
+    finder_reply = (
+        '[{"id":"F-001","contract":"src/A.sol","location":"a()",'
+        '"vuln_class":"access-control","hypothesis":"h"}]'
+    )
+    # The verifier claims critical while admitting it had to deploy badly.
+    verifier_reply = (
+        '{"finding_id":"F-001","verdict":"confirmed","severity":"critical",'
+        '"deployment_contingent":true,"poc_path":"test/F-001.t.sol",'
+        '"evidence":"deployed with signer=address(0), drained 5 ether"}'
+    )
+    ws = tmp_path / "ws"
+    (ws / "test").mkdir(parents=True)
+
+    result = audit_phase1(
+        {"anthropic": ScriptedAdapter(replies=[finder_reply, verifier_reply])},
+        _config(),
+        ToolContext(workspace=ws),
+        "src/A.sol",
+    )
+
+    assert result.verdicts[0].severity == "medium", "uncapped severity reached the result"
+    assert result.output.findings[0].severity == "medium"
+    assert result.output.findings[0].deployment_contingent is True
+    # The reader must see the precondition, not just a lowered number.
+    assert "misconfigured deployment" in result.output.report_markdown
+
+
 def test_audit_phase1_bills_a_failed_run_to_the_role_that_died(tmp_path, monkeypatch):
     """Credits running out mid-verification is the case this exists for: the
     finder's completed work and the dead verification's partial spend must both
@@ -416,7 +451,9 @@ def test_audit_phase1_bills_a_failed_run_to_the_role_that_died(tmp_path, monkeyp
         def check_capabilities(self, model: str) -> None:
             return None
 
-        def complete(self, *, model, system, tools, messages, max_tokens) -> LLMResponse:
+        def complete(
+        self, *, model, system, tools, messages, max_tokens, effort=None
+    ) -> LLMResponse:
             self.calls += 1
             if self.calls == 1:  # the finder succeeds
                 return LLMResponse(
@@ -549,7 +586,28 @@ def test_roles_fall_back_to_the_single_agent_profile():
     config = _config()
     assert config.role("finder") == config.agent
     assert config.role("verifier") == config.agent
-    assert config.label("phase1") == "phase1/anthropic:m"
+    assert config.label("phase1") == "phase1/anthropic:m@provider-default"
+
+
+def test_label_states_the_effort_a_run_used():
+    """The same model at two efforts is two configurations. A label that omitted
+    effort would let sweep rows that are not comparable look comparable."""
+    base = ModelProfile(provider="anthropic", model="m")
+    assert AgentConfig(agent=base, effort="xhigh").label("phase1").endswith("@xhigh")
+    assert AgentConfig(agent=base, effort="low").label("phase1").endswith("@low")
+
+
+def test_unset_effort_is_labeled_not_blank():
+    """Provider defaults differ across labs (anthropic high, openai gpt-5.x
+    medium), so 'unset' is a real configuration and must be recorded as one
+    rather than reading as 'no effort setting involved'."""
+    label = AgentConfig(agent=ModelProfile(provider="anthropic", model="m")).label("phase1")
+    assert label.endswith("@provider-default")
+
+
+def test_unknown_effort_is_rejected_at_construction():
+    with pytest.raises(ValueError, match="unknown effort"):
+        AgentConfig(agent=ModelProfile(provider="anthropic", model="m"), effort="turbo")
 
 
 def test_split_routing_is_visible_in_the_run_label():

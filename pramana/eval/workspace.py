@@ -13,7 +13,7 @@ import hashlib
 import json
 import os
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -30,6 +30,18 @@ class KnownBug:
     # Per-bug reference PoC (relative to the fixture dir). When absent, the
     # fixture-level `reference_poc` is used. Multi-bug fixtures set one per bug.
     reference_poc: str | None = None
+    # Additional vulnerability classes that also identify *this* bug, for bugs
+    # where two names are both defensible — delegatecall storage collision is
+    # equally an access-control break (the mechanism vs. the consequence).
+    # Without this, grading a proven exploit turns on which name the model
+    # happened to pick, which is style, not capability.
+    #
+    # Scoped per bug on purpose. Widening the global synonym map instead would
+    # merge two classes everywhere, so a model that found only an access-control
+    # bug could be credited for a delegatecall one it never saw. An alias here
+    # cannot reach any other bug or any other fixture. Corpus-integrity tests
+    # enforce that an alias never collides with a sibling bug's own class.
+    accepts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -73,6 +85,12 @@ def corpus_fingerprint(fixtures: list[Fixture]) -> str:
     so a baseline that does not pin the corpus can be silently compared against
     numbers it has no relationship to. Covers the target sources and the label
     set; reference PoCs are excluded since they never reach the agent.
+
+    Deliberately excludes how findings are *graded* — accepted aliases, the
+    synonym map, the matching rule. Those change what a run scores without
+    changing what the agent was asked to do, so they are pinned separately by
+    ``GRADER_VERSION``. Two identifiers because there are two questions: "is
+    this the same corpus?" and "was it graded the same way?".
     """
     digest = hashlib.sha256()
     for fixture in sorted(fixtures, key=lambda f: f.name):

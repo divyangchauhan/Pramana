@@ -2,6 +2,7 @@
   "true_positive_findings": 10,
   "total_known_bugs": 11,
   "corpus_fingerprint": "007869fd6cad",
+  "grader_version": 3,
   "negative_control_fixtures": [
     "reentrancy-vault-patched"
   ],

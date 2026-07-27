@@ -59,6 +59,7 @@ def run_agent(
     max_turns: int = 25,
     max_tokens: int = 16_000,
     max_output_chars: int = 20_000,
+    effort: str | None = None,
     trace: TraceFn | None = None,
 ) -> AgentRun:
     """Run one agent to completion."""
@@ -74,6 +75,7 @@ def run_agent(
                 system=system_prompt,
                 tools=tools,
                 messages=messages,
+                effort=effort,
             )
         except BaseException as exc:
             # Every earlier turn was billed regardless of how this one ended.

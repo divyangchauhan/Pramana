@@ -6,6 +6,21 @@ positive is a finding the agent marked "confirmed" whose PoC test the harness
 *independently re-runs and sees pass* in a pristine workspace, and whose
 vulnerability class matches a known bug in the fixture (matched 1:1).
 
+That last condition is the weak one: the first two are executable facts, while
+the third is string equality on a free-text label. Models name one bug many
+ways — the same proven delegatecall storage collision has been reported as
+`unrestricted-delegatecall`, `arbitrary-delegatecall` and plain `access-control`
+— and label vocabulary is a per-model habit, so a grader sensitive to it partly
+ranks naming style instead of capability. Two mechanisms keep that from costing
+a correct finding, and they answer different questions:
+
+  * `normalize_vuln_class` decides which class a label *names* when it carries
+    words from several, by specificity rather than by where the classes happen
+    to sit in the synonym map. General; applies to every label.
+  * `KnownBug.accepts` in fixture.json declares the alternative names for a bug
+    whose class is genuinely ambiguous — a delegatecall storage collision is
+    equally an access-control break. Per bug, because the ambiguity is.
+
 Run modes:
   * ``--self-check``    grade the reference PoCs (no API key; validates the
                         corpus + grading path end to end).
@@ -23,8 +38,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..agents.loop import TraceFn
-from ..config import AgentConfig
-from ..cost import PRICE_TABLE_VERSION, Usage, estimate_usd
+from ..config import EFFORT_LEVELS, SUPPORTED_PROVIDERS, AgentConfig
+from ..cost import PRICE_TABLE_VERSION, Usage, estimate_usd, estimate_usd_notional
 from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
 from ..tools.files import ToolContext, ToolError
@@ -32,13 +47,32 @@ from ..tools.foundry import ForgeResult, forge_test
 from .workspace import (
     DATASETS_DIR,
     Fixture,
+    KnownBug,
     build_workspace,
     corpus_fingerprint,
     ensure_dependencies_installed,
     load_fixtures,
 )
 
+# Bumped whenever a change alters what a run scores from identical agent output.
+# The corpus fingerprint cannot carry this: aliases and matching rules change
+# the grade without changing the task. A recorded number is only comparable to
+# another with the same corpus fingerprint *and* the same grader version.
+#   1 — matching on the normalized class alone.
+#   2 — per-bug `accepts` aliases; primary-class matches take precedence.
+#   3 — labels resolve by specificity (qualifier tier, then needle length)
+#       instead of by the synonym map's declaration order.
+GRADER_VERSION = 3
+
 # Canonical vulnerability class -> substrings that should map to it.
+#
+# Needles must be written in slug form (lowercase, `-` for punctuation), because
+# `normalize_vuln_class` slugifies the label before matching: a needle spelled
+# `tx.origin` could never fire. Enforced by test_synonym_map.
+#
+# Declaration order is *not* precedence — see `normalize_vuln_class`. It only
+# breaks ties between needles of equal length, so a class may be added anywhere
+# without silently demoting the ones below it.
 SYNONYMS: dict[str, tuple[str, ...]] = {
     "reentrancy": ("reentran", "re-entran"),
     "access-control": (
@@ -50,7 +84,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
         "owner",
         "privilege",
     ),
-    "tx-origin": ("tx-origin", "txorigin", "tx.origin"),
+    "tx-origin": ("tx-origin", "txorigin"),
     "integer-overflow": ("overflow", "underflow", "arithmetic", "batchoverflow"),
     "unchecked-call": ("unchecked", "unchecked-return", "unchecked-call", "unchecked-send"),
     "missing-zero-check": ("zero-address", "zero-check", "missing-zero", "zero-addr"),
@@ -59,13 +93,85 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "signature-replay": ("replay", "signature-replay", "missing-nonce", "sig-replay"),
 }
 
+# Needles that qualify a bug rather than name it.
+#
+# `unprotected`, `owner` and `unchecked` say how something is broken, not what
+# it is, and models reach for them as adjectives in front of every class:
+# `unprotected-delegatecall`, `unchecked-zero-address`, `owner-signature-replay`.
+# Each names its class only when nothing more specific in the label does. Length
+# alone cannot express that — `unprotected` (11) is longer than `reentran` (8) —
+# so these are ranked below any substantive match instead.
+QUALIFIERS = frozenset(
+    {
+        "unprotected",
+        "authorization",
+        "auth",
+        "ownership",
+        "owner",
+        "privilege",
+        "unchecked",
+    }
+)
+
 
 def normalize_vuln_class(raw: str) -> str:
+    """Canonicalize a free-text vulnerability label.
+
+    Labels routinely carry words belonging to two classes — `unprotected-
+    delegatecall` names both a mechanism and its precondition — so something has
+    to decide which one the label is *about*. This resolves by specificity: a
+    substantive needle beats a QUALIFIER, and within a tier the longest match
+    wins, on the basis that `delegatecall` says more than `delegate` does.
+
+    Through grader v2 this was first-match-wins over the ordered map, which made
+    precedence a function of typing position. `access-control` sits near the top
+    holding the most generic needles in the vocabulary, so it quietly captured
+    labels belonging to six other classes; `signature-replay`, declared last,
+    could be outranked by all of them. Nothing about the label is wrong when
+    that happens — the finding is correct and its PoC passes, and the run still
+    records a miss.
+
+    Ties fall back to declaration order: arbitrary, but deterministic. An exact
+    match on a canonical name always wins outright.
+    """
     key = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
+    best, best_score = key, (0, 0)
     for canonical, needles in SYNONYMS.items():
-        if key == canonical or any(n in key for n in needles):
+        if key == canonical:
             return canonical
-    return key
+        hits = [n for n in needles if n in key]
+        strong = max((len(n) for n in hits if n not in QUALIFIERS), default=0)
+        weak = max((len(n) for n in hits if n in QUALIFIERS), default=0)
+        score = (1, strong) if strong else (0, weak)
+        if score > best_score:
+            best, best_score = canonical, score
+    return best
+
+
+def accepted_classes(bug: KnownBug) -> set[str]:
+    """Every normalized class that identifies ``bug``: its own, plus aliases."""
+    return {normalize_vuln_class(bug.vuln_class)} | {
+        normalize_vuln_class(alias) for alias in bug.accepts
+    }
+
+
+def _match_bug(known: list[KnownBug], cls: str, claimed: set[str]) -> KnownBug | None:
+    """The unclaimed bug that ``cls`` identifies, or None.
+
+    Primary classes are tried before aliases across the whole fixture: an alias
+    is a concession to naming ambiguity, so it must never outrank a bug that
+    carries the class outright. Without the two passes, a finding could be
+    credited to a bug that merely tolerates its label while the bug actually
+    named that way went unmatched — inflating one bug's recall and hiding the
+    other's miss inside an unchanged total.
+    """
+    for bug in known:
+        if bug.id not in claimed and normalize_vuln_class(bug.vuln_class) == cls:
+            return bug
+    for bug in known:
+        if bug.id not in claimed and cls in accepted_classes(bug):
+            return bug
+    return None
 
 
 @dataclass
@@ -133,7 +239,7 @@ def grade(
 
     for probe in probes:
         cls = normalize_vuln_class(probe.vuln_class)
-        candidate_hit = any(normalize_vuln_class(kb.vuln_class) == cls for kb in known)
+        candidate_hit = any(cls in accepted_classes(kb) for kb in known)
         candidate_hits += int(candidate_hit)
 
         poc_ran = poc_passed = False
@@ -145,13 +251,11 @@ def grade(
             poc_ran, poc_passed = res.ran, res.passed
             confirmed_pass += int(poc_passed)
 
-        is_tp = False
+        matched: KnownBug | None = None
         if probe.verdict == "confirmed" and poc_passed:
-            for kb in known:
-                if kb.id not in matched_bug_ids and normalize_vuln_class(kb.vuln_class) == cls:
-                    matched_bug_ids.add(kb.id)
-                    is_tp = True
-                    break
+            matched = _match_bug(known, cls, matched_bug_ids)
+            if matched is not None:
+                matched_bug_ids.add(matched.id)
 
         details.append(
             {
@@ -161,7 +265,15 @@ def grade(
                 "verdict": probe.verdict,
                 "poc_ran": poc_ran,
                 "poc_passed": poc_passed,
-                "counted_true_positive": is_tp,
+                "counted_true_positive": matched is not None,
+                # Which bug it was credited to, and whether the label matched
+                # outright or only via an alias. An audit trail: a run where
+                # every match is aliased is a sign the corpus labels drifted
+                # from how models actually name these bugs.
+                "matched_bug": None if matched is None else matched.id,
+                "matched_via_alias": (
+                    matched is not None and normalize_vuln_class(matched.vuln_class) != cls
+                ),
             }
         )
 
@@ -234,7 +346,15 @@ def _usage_rows(usage: dict[str, tuple[str, Usage]]) -> dict[str, dict]:
     rows: dict[str, dict] = {}
     for role, (key, u) in usage.items():
         usd = estimate_usd(key, u)
-        rows[role] = {"model": key, **u.as_dict(), "usd": None if usd is None else round(usd, 6)}
+        notional = estimate_usd_notional(key, u)
+        rows[role] = {
+            "model": key,
+            **u.as_dict(),
+            "usd": None if usd is None else round(usd, 6),
+            # Gateway rows only: list-price cost of the same tokens. Never
+            # summed with `usd` — no money moved at this rate.
+            "usd_notional": None if notional is None else round(notional, 6),
+        }
     return rows
 
 
@@ -334,6 +454,9 @@ def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> 
         # Pins the corpus these numbers were scored against. Results from
         # different corpora are not comparable, however similar they look.
         "corpus_fingerprint": corpus_fingerprint(fixtures) if fixtures else None,
+        # ...and the rules they were scored under. Same corpus, different
+        # grader, different number from identical agent output.
+        "grader_version": GRADER_VERSION,
         # Negative controls hold no known bugs, so every confirmed finding on
         # one is unambiguously a false positive.
         "negative_control_fixtures": [r.fixture for r in controls],
@@ -374,27 +497,37 @@ def _cost_summary(rows: list[FixtureRow]) -> dict:
                     "calls": 0,
                     "elapsed_s": 0.0,
                     "usd": 0.0,
+                    "usd_notional": 0.0,
                 },
             )
             for field_name in ("input_tokens", "output_tokens", "calls", "elapsed_s"):
                 acc[field_name] += entry[field_name]
             # One unpriced model poisons the role total rather than silently
             # dropping out of it — an understated cost picks a false winner.
-            if acc["usd"] is not None and entry["usd"] is not None:
-                acc["usd"] += entry["usd"]
-            else:
-                acc["usd"] = None
+            for money in ("usd", "usd_notional"):
+                if acc[money] is not None and entry.get(money) is not None:
+                    acc[money] += entry[money]
+                else:
+                    acc[money] = None
     for acc in by_role.values():
         acc["elapsed_s"] = round(acc["elapsed_s"], 3)
-        if acc["usd"] is not None:
-            acc["usd"] = round(acc["usd"], 6)
-    totals = [a["usd"] for a in by_role.values()]
+        for money in ("usd", "usd_notional"):
+            if acc[money] is not None:
+                acc[money] = round(acc[money], 6)
+
+    def _total(field_name: str) -> float | None:
+        values = [a[field_name] for a in by_role.values()]
+        if not values or any(v is None for v in values):
+            return None
+        return round(sum(v for v in values), 6)
+
     return {
         "price_table_version": PRICE_TABLE_VERSION,
         "by_role": by_role,
-        "usd_total": (
-            None if any(t is None for t in totals) else round(sum(t for t in totals), 6)
-        ),
+        "usd_total": _total("usd"),
+        # Gateway runs only. Never add this to usd_total — it is what the run
+        # *would* have cost at list price, not money that moved.
+        "usd_notional_total": _total("usd_notional"),
     }
 
 
@@ -441,15 +574,29 @@ def print_report(rows: list[FixtureRow]) -> None:
     cost = _cost_summary(rows)
     if cost["by_role"]:
         print(f"\nCOST (price table {cost['price_table_version']})")
+
+        def _money(acc: dict) -> str:
+            if acc["usd"] is not None:
+                return f"${acc['usd']:.4f}"
+            if acc.get("usd_notional") is not None:
+                # Tilde and the word "notional" both present: this is what the
+                # tokens would list for, not money that moved.
+                return f"~${acc['usd_notional']:.4f}*"
+            return "unpriced"
+
         for role, acc in sorted(cost["by_role"].items()):
-            usd = "unpriced" if acc["usd"] is None else f"${acc['usd']:.4f}"
             print(f"  {role:<9} {acc['model']:<28} "
                   f"in {acc['input_tokens']:>8,}  out {acc['output_tokens']:>7,}  "
-                  f"{acc['calls']:>3} calls  {acc['elapsed_s']:>7.1f}s  {usd:>10}")
-        total = cost["usd_total"]
+                  f"{acc['calls']:>3} calls  {acc['elapsed_s']:>7.1f}s  {_money(acc):>11}")
+        total = _money(
+            {"usd": cost["usd_total"], "usd_notional": cost["usd_notional_total"]}
+        )
         print(f"  {'TOTAL':<9} {'':<28} "
-              f"{'':>12}  {'':>11}  {'':>9}  {'':>8}  "
-              f"{('unpriced' if total is None else f'${total:.4f}'):>10}")
+              f"{'':>12}  {'':>11}  {'':>9}  {'':>8}  {total:>11}")
+        if cost["usd_notional_total"] is not None:
+            print("  * notional — gateway billing is a flat subscription, so no "
+                  "money moved at these rates.")
+            print("    Shown for efficiency comparison against first-party rows only.")
     print()
 
 
@@ -476,7 +623,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pramana Phase 0 evaluation harness")
     parser.add_argument("--self-check", action="store_true",
                         help="grade reference PoCs only (no API key needed)")
-    parser.add_argument("--provider", choices=["anthropic", "openai", "kimi"],
+    # Derived, not duplicated: a hardcoded list silently omits any provider
+    # added later, and the CLI is the only way anyone reaches one.
+    parser.add_argument("--provider", choices=list(SUPPORTED_PROVIDERS),
                         help="LLM provider for a real agent run")
     parser.add_argument("--model", help="override the model id for the provider")
     parser.add_argument("--pipeline", choices=["phase0", "phase1"], default="phase1",
@@ -484,6 +633,11 @@ def main(argv: list[str] | None = None) -> int:
                              "verifier (default)")
     parser.add_argument("--finder-model", help="route the finder to a different model (phase1)")
     parser.add_argument("--verifier-model", help="route the verifier to a different model (phase1)")
+    parser.add_argument("--effort", choices=list(EFFORT_LEVELS),
+                        help="reasoning depth for every role. Leaving this unset is NOT "
+                             "neutral: provider defaults differ (anthropic high, openai "
+                             "gpt-5.x medium), so an unset effort compares models at "
+                             "different depths")
     parser.add_argument("--max-poc-attempts", type=int, default=4,
                         help="executed forge runs allowed per verification (phase1, default 4)")
     parser.add_argument("--fixtures", nargs="*", help="restrict to these fixture names")
@@ -540,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
             max_turns=args.max_turns,
             max_tokens=args.max_tokens,
             max_poc_attempts=args.max_poc_attempts,
+            effort=args.effort,
         )
         try:
             rows = run_agent_eval(

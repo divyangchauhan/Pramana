@@ -84,6 +84,14 @@ class LLMAdapter(Protocol):
         tools: list[ToolSchema],
         messages: list[Message],
         max_tokens: int,
+        effort: str | None = None,
     ) -> LLMResponse:
-        """Run one turn and return a normalized response."""
+        """Run one turn and return a normalized response.
+
+        ``effort`` is the canonical reasoning-depth name (see
+        ``config.EFFORT_LEVELS``); each adapter maps it onto its provider's own
+        control. ``None`` means "send nothing", which is *not* a neutral choice
+        — provider defaults differ across labs, so an unset effort compares
+        models at different depths.
+        """
         ...

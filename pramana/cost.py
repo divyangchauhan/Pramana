@@ -86,7 +86,7 @@ PRICE_TABLE_VERSION = "2026-07-22"
 
 PRICE_TABLE_SOURCES = {
     "anthropic": "https://platform.claude.com/docs/en/docs/about-claude/pricing",
-    "openai": "https://developers.openai.com/api/docs/models/gpt-5.5",
+    "openai": "https://developers.openai.com/api/docs/models/gpt-5.6",
     "kimi": "https://api.moonshot.ai/",
 }
 
@@ -95,13 +95,47 @@ PRICE_TABLE_SOURCES = {
 # a gateway is a different key, not a silent reuse of this one.
 PRICES: dict[str, Price] = {
     "anthropic:claude-opus-4-8": Price(5.0, 25.0),
+    # 2x Opus on both axes — the most expensive slot in the sweep.
+    "anthropic:claude-fable-5": Price(10.0, 50.0),
     "openai:gpt-5.5": Price(5.0, 30.0),
+    "openai:gpt-5.6-sol": Price(5.0, 30.0),
     "kimi:kimi-k3": Price(3.0, 15.0),
+}
+
+
+# Gateway provider -> the first-party provider whose list price its models are
+# served under. Used only to compute a *notional* cost; never to fill in `usd`.
+NOTIONAL_EQUIVALENT: dict[str, str] = {
+    "openai-gateway": "openai",
+    "anthropic-gateway": "anthropic",
 }
 
 
 def model_key(provider: str, model: str) -> str:
     return f"{provider}:{model}"
+
+
+def notional_key(key: str) -> str | None:
+    """The first-party key whose list price corresponds to ``key``, if any."""
+    provider, _, model = key.partition(":")
+    equivalent = NOTIONAL_EQUIVALENT.get(provider)
+    return f"{equivalent}:{model}" if equivalent else None
+
+
+def estimate_usd_notional(key: str, usage: Usage) -> float | None:
+    """What ``usage`` *would* have cost at first-party list price.
+
+    For gateway runs only, and deliberately a separate field from ``usd``.
+    A subscription-replaying proxy bills a flat fee, so no money moved at these
+    rates — but the token counts are real, and pricing them makes a gateway row
+    comparable to a first-party one on efficiency.
+
+    Read it as "what this configuration would cost to run properly", never as
+    spend. ``usd`` stays ``None`` for these rows precisely so the two can never
+    be added together by accident.
+    """
+    equivalent = notional_key(key)
+    return estimate_usd(equivalent, usage) if equivalent else None
 
 
 def estimate_usd(key: str, usage: Usage) -> float | None:

@@ -14,7 +14,14 @@ from dataclasses import dataclass, field
 import pytest
 
 from pramana.agents.loop import AgentRun, AgentTurnLimitError, run_agent, spent_on
-from pramana.cost import PRICES, Usage, estimate_usd, model_key, total_usd
+from pramana.cost import (
+    PRICES,
+    Usage,
+    estimate_usd,
+    estimate_usd_notional,
+    model_key,
+    total_usd,
+)
 from pramana.eval.harness import FixtureRow, _cost_summary, _usage_rows
 from pramana.providers.base import LLMResponse, ToolCall
 
@@ -84,7 +91,7 @@ class _Adapter:
     def check_capabilities(self, model: str) -> None:
         return None
 
-    def complete(self, *, model, system, tools, messages, max_tokens) -> LLMResponse:
+    def complete(self, *, model, system, tools, messages, max_tokens, effort=None) -> LLMResponse:
         self.calls += 1
         usage = {"input_tokens": 100, "output_tokens": 10}
         if self.calls <= self.turns:
@@ -98,9 +105,7 @@ class _Adapter:
 
 
 def _run(adapter, **kw) -> AgentRun:
-    return run_agent(
-        adapter, "sys", [], {"noop": lambda **_: "ok"}, seed="go", model="m", **kw
-    )
+    return run_agent(adapter, "sys", [], {"noop": lambda **_: "ok"}, seed="go", model="m", **kw)
 
 
 def test_run_agent_sums_usage_over_every_turn():
@@ -223,3 +228,69 @@ def test_cost_summary_stamps_the_price_table_version():
     """A recorded dollar figure is meaningless without the table that produced it."""
     summary = _cost_summary([_row("a", _usage_rows({}))])
     assert summary["price_table_version"]
+
+
+# --- gateway rows must not borrow first-party prices -------------------------
+
+
+def test_gateway_key_is_unpriced_even_though_the_model_id_is_priced():
+    """A proxy replaying a subscription charges a flat fee, not per token. If
+    a gateway row borrowed the first-party price it would report dollars that
+    were never charged — worse than reporting nothing."""
+    assert estimate_usd("openai:gpt-5.6-sol", Usage(input_tokens=1_000_000)) == pytest.approx(5.0)
+    assert estimate_usd("openai-gateway:gpt-5.6-sol", Usage(input_tokens=1_000_000)) is None
+
+
+def test_no_gateway_entry_may_be_added_to_the_price_table():
+    """A guard against a well-meaning future edit: per-token pricing for a
+    gateway is not knowable from the model id alone."""
+    assert not [k for k in PRICES if k.startswith("openai-gateway:")]
+
+
+def test_gateway_row_reports_a_notional_cost_beside_a_null_actual():
+    """Token counts are real even when the billing is a flat subscription, so
+    the run is comparable on efficiency — but the two numbers must never merge."""
+    rows = _usage_rows({"finder": ("openai-gateway:gpt-5.6-sol", Usage(input_tokens=1_000_000))})
+    assert rows["finder"]["usd"] is None, "notional money must not fill in actual spend"
+    assert rows["finder"]["usd_notional"] == pytest.approx(5.0)
+
+
+def test_first_party_row_has_no_notional_figure():
+    """Notional exists only where actual is unknowable; carrying both on a
+    priced row invites summing them."""
+    rows = _usage_rows({"finder": ("anthropic:claude-opus-4-8", Usage(input_tokens=1_000_000))})
+    assert rows["finder"]["usd"] == pytest.approx(5.0)
+    assert rows["finder"]["usd_notional"] is None
+
+
+def test_notional_total_is_separate_from_usd_total():
+    rows = [
+        _row(
+            "a", _usage_rows({"finder": ("openai-gateway:gpt-5.5", Usage(input_tokens=2_000_000))})
+        )
+    ]
+    summary = _cost_summary(rows)
+    assert summary["usd_total"] is None
+    assert summary["usd_notional_total"] == pytest.approx(10.0)
+
+
+def test_notional_uses_the_first_party_price_of_the_same_model():
+    """Not a flat guess: gpt-5.5 and kimi are priced differently, and the
+    notional figure must track whichever model actually ran."""
+    from pramana.cost import notional_key
+
+    assert notional_key("openai-gateway:gpt-5.5") == "openai:gpt-5.5"
+    assert notional_key("anthropic:claude-opus-4-8") is None
+
+
+def test_anthropic_gateway_is_unpriced_but_carries_a_notional_opus_cost():
+    """A Claude subscription bills a flat fee, so an Opus run through the proxy
+    must report no actual spend — but its tokens price against first-party Opus
+    so it stays comparable on efficiency to a real-API Opus row."""
+    from pramana.cost import notional_key
+
+    key = "anthropic-gateway:claude-opus-4-8"
+    assert notional_key(key) == "anthropic:claude-opus-4-8"
+    assert estimate_usd(key, Usage(input_tokens=1_000_000)) is None
+    assert estimate_usd_notional(key, Usage(input_tokens=1_000_000)) == pytest.approx(5.0)
+    assert not [k for k in PRICES if k.startswith("anthropic-gateway:")]

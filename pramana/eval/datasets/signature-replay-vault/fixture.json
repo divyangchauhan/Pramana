@@ -9,6 +9,21 @@
       "vuln_class": "signature-replay",
       "location": "SignedVault.release()",
       "description": "The signed digest covers only recipient and amount, with no nonce, deadline or record of spent authorizations, so a single signature can be submitted repeatedly until the vault is empty."
+    },
+    {
+      "id": "KB-2",
+      "vuln_class": "zero-signer",
+      "location": "SignedVault.constructor() / release()",
+      "description": "The constructor does not reject a zero signer, and ecrecover returns address(0) for a malformed signature. A vault deployed with signer == address(0) therefore accepts any garbage signature and releases funds to an attacker-chosen recipient. Deployment-contingent.",
+      "reference_poc": "reference/ZeroSignerExploit.t.sol",
+      "accepts": ["access-control", "missing-zero-check", "unchecked-call"]
+    },
+    {
+      "id": "KB-3",
+      "vuln_class": "fixed-gas-transfer",
+      "location": "SignedVault.release()",
+      "description": "Payout uses to.transfer(amount), whose fixed 2300 gas stipend cannot cover a contract recipient with non-trivial receive logic. A validly authorized contract recipient can never be paid and its funds are stranded, since release is the only withdrawal path.",
+      "reference_poc": "reference/FixedGasTransferDoS.t.sol"
     }
   ]
 }

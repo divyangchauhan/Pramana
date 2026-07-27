@@ -122,6 +122,13 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
             "aggregated into one baseline"
         )
 
+    grader_versions = {r.get("grader_version") for r in runs if r.get("grader_version")}
+    if len(grader_versions) > 1:
+        raise SystemExit(
+            f"runs span different grader versions ({sorted(grader_versions)}); the same "
+            "agent output scores differently under each, so they cannot be aggregated"
+        )
+
     return {
         "label": label,
         "captured_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -131,6 +138,9 @@ def aggregate(run_paths: list[Path], label: str) -> dict[str, Any]:
         "working_tree_dirty": _tracked_files_dirty(),
         "configs": configs,
         "corpus_fingerprint": next(iter(fingerprints), None),
+        # The grading rules the floor/ceiling were computed under. A gate check
+        # against a candidate graded differently compares two different metrics.
+        "grader_version": next(iter(grader_versions), None),
         "n_runs": len(runs),
         "total_known_bugs": runs[0]["total_known_bugs"],
         "true_positives_per_run": totals,
@@ -330,6 +340,22 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
     # describe the same corpus. Surface that rather than implying it was checked.
     corpus_unverified = not corpus_mismatch and not (base_corpus and cand_corpus)
 
+    # Same argument one level down: identical agent output scores differently
+    # under different grading rules, so a cross-version gate measures the grader
+    # change, not the pipeline. Reported, not fatal — the honest fix is to
+    # re-record the baseline, and refusing to gate at all until someone does
+    # leaves the pipeline unguarded for longer than a loud warning does.
+    #
+    # Do not read this as safe in one direction only. v2's aliases could only
+    # *add* matches, so they could never manufacture a false pass; v3 re-resolves
+    # ambiguous labels and can move one either way.
+    base_grader = baseline.get("grader_version")
+    cand_grader = candidate.get("grader_version")
+    grader_mismatch = bool(base_grader and cand_grader and base_grader != cand_grader)
+    # A baseline recorded before grader versioning cannot be *shown* to have used
+    # the current rules. Say so rather than letting silence imply it was checked.
+    grader_unverified = not grader_mismatch and not (base_grader and cand_grader)
+
     tp_regression = tp_min < tp_floor
     fp_regression = fp_max > fp_ceiling
     unmatched_regression = unmatched_max > unmatched_ceiling
@@ -338,6 +364,10 @@ def compare(candidate: dict[str, Any], baseline: dict[str, Any]) -> dict[str, An
         "candidate_corpus": cand_corpus,
         "corpus_mismatch": corpus_mismatch,
         "corpus_unverified": corpus_unverified,
+        "baseline_grader_version": base_grader,
+        "candidate_grader_version": cand_grader,
+        "grader_mismatch": grader_mismatch,
+        "grader_unverified": grader_unverified,
         "unmatched_ceiling": unmatched_ceiling,
         "candidate_unmatched_max": unmatched_max,
         "unmatched_regression": unmatched_regression,
@@ -384,6 +414,19 @@ def render_comparison(c: dict[str, Any]) -> str:
         lines += [
             "> ⚠️ The baseline predates corpus fingerprinting, so it could not be "
             "confirmed to describe the same fixtures. Treat this verdict as advisory.",
+            "",
+        ]
+    if c.get("grader_mismatch"):
+        lines += [
+            f"> ⚠️ Graded under different rules — baseline v{c['baseline_grader_version']}, "
+            f"this run v{c['candidate_grader_version']}. Identical agent output can score "
+            "differently across versions; re-record the baseline to gate on like for like.",
+            "",
+        ]
+    elif c.get("grader_unverified"):
+        lines += [
+            "> ⚠️ The baseline predates grader versioning, so the rules it was scored "
+            "under are unrecorded.",
             "",
         ]
     lines += [
