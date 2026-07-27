@@ -64,6 +64,19 @@ class CapabilityError(ProviderError):
     """Raised at startup when a selected model lacks a required capability."""
 
 
+class ProviderRefusalError(ProviderError):
+    """The model declined the request at its own safety layer.
+
+    Distinct from a transport failure or a malformed response: the call
+    succeeded and the model chose not to answer (Anthropic ``stop_reason:
+    "refusal"``; OpenAI ``finish_reason: "content_filter"`` or a ``refusal``
+    message). Without this, a refusal returns empty content and surfaces
+    downstream as a confusing ``OutputParseError`` — recording a model's own
+    decline as if the pipeline had a parsing bug. Some models refuse the
+    vulnerability-finder task outright while others run it cleanly, so a
+    cross-model sweep must be able to name a refusal as what it is."""
+
+
 @runtime_checkable
 class LLMAdapter(Protocol):
     """The only surface the agent loop depends on."""
