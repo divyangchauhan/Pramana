@@ -25,6 +25,11 @@ class ToolContext:
     forge_timeout: int = 300
     forge_retries: int = 2
     max_output_chars: int = 20_000
+    # Content-addressed cache for deterministic tool output (Slither). ``None``
+    # disables caching entirely, keeping the uncached path for tests and
+    # clean-room measurements; the harness points it at a persistent directory
+    # so repeated runs over identical source reuse the analysis (design §9).
+    slither_cache_dir: Path | None = None
 
     def resolve(self, path: str) -> Path:
         """Resolve ``path`` against the workspace and reject any escape."""

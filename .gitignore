@@ -32,6 +32,9 @@ dependencies/
 # Local run outputs
 *.log
 
+# Content-addressed tool cache (Slither output); regenerated on demand
+/.cache/
+
 # Generated eval workspaces (e.g. `--work-dir ./runs`) — throwaway Foundry
 # projects with the agent's PoCs and build artifacts; reproducible, not source.
 /runs/

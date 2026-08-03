@@ -274,6 +274,7 @@ uv run python -m pramana.eval.harness --provider kimi   --model <kimi-k3-id>
 --verbose                                      # stream tool calls to stderr
 --work-dir ./runs                              # keep workspaces (agent PoCs) to inspect
 --forge-retries 3                              # retries for transient forge/anvil flakiness
+--no-slither-cache                             # bypass the Slither result cache (clean-room timing)
 ```
 
 </details>
@@ -346,7 +347,7 @@ Built as a **vertical slice first**, deepening before it widens — every phase 
 
 - **Phase 0 — Vertical slice** ✅ — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus. [Baseline](baselines/phase-0/).
 - **Phase 1 — Split the verifier** ✅ — a context-isolated verifier that sees only the bare claim, so verification can't be biased by the hypothesis. Gated against the [Phase 0 baseline](baselines/phase-0/) and recorded as the [Phase 1 gate reference](baselines/phase-1-8693741ffa57/).
-- **Phase 2 — Routing, governance & the reporter** 🚧 *(current)* — the [four-model sweep](#four-models-one-unmodified-pipeline) with per-role routing and subscription-proxy gateways; a **deployment-contingent severity cap**; the corpus expansion the sweep surfaced; and the **reporter** (Nirnaya) — the third `run_agent` role and the only stage that sees every verdict at once, so it catches cross-finding duplicates. It authors prose (description, impact, remediation, executive summary, duplicate links); severity, PoC path, verdict and counts stay [governed in code](#why-the-design-holds-up). Still ahead: Slither/compile caching.
+- **Phase 2 — Routing, governance & the reporter** 🚧 *(current)* — the [four-model sweep](#four-models-one-unmodified-pipeline) with per-role routing and subscription-proxy gateways; a **deployment-contingent severity cap**; the corpus expansion the sweep surfaced; and the **reporter** (Nirnaya) — the third `run_agent` role and the only stage that sees every verdict at once, so it catches cross-finding duplicates. It authors prose (description, impact, remediation, executive summary, duplicate links); severity, PoC path, verdict and counts stay [governed in code](#why-the-design-holds-up). Slither output is now content-cached across runs (a cold pass is seconds; a cache hit is instant); compile caching is still ahead.
 - **Phase 3 — Scale & harden** — public benchmarks (Code4rena / Sherlock / DeFiHackLabs), a full paired vulnerable/patched set, and structured observability.
 
 The three agents have fixed identities — **Anumana** (finder / inference), **Khandana** (verifier / refutation), **Nirnaya** (reporter / conclusion) — the three *pramāṇas* by which a finding becomes proven knowledge.
