@@ -111,7 +111,9 @@ def run_slither_summary(ctx: ToolContext, path: str) -> str:
     key = _cache_key(target)
     cached = cache_get(ctx.slither_cache_dir, key)
     if cached is not None:
+        ctx.emit_trace({"event": "cache", "cache": "slither", "hit": True})
         return _summarize(cached)
+    ctx.emit_trace({"event": "cache", "cache": "slither", "hit": False})
 
     try:
         proc = subprocess.run(

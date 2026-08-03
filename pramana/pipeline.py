@@ -135,7 +135,7 @@ def audit_phase0(
             max_tokens=config.max_tokens,
             max_output_chars=ctx.max_output_chars,
             effort=config.effort,
-            trace=trace,
+            trace=_role_trace(trace, "agent"),
         )
         output = parse_phase0_output(run.text)
     except Exception as exc:

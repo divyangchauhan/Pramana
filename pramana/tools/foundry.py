@@ -75,6 +75,8 @@ def prime_compile_cache(ctx: ToolContext) -> bool:
     the verifier receives Forge's normal diagnostic when it runs its PoC.
     """
     if ctx.forge_cache_dir is None:
+        ctx.emit_trace({"event": "cache", "cache": "forge_compile", "hit": False,
+                        "disabled": True})
         return False
     key = _compile_cache_key(ctx.workspace)
     if cache_tree_get(ctx.forge_cache_dir, key, ctx.workspace / ".compile-state"):
@@ -83,11 +85,13 @@ def prime_compile_cache(ctx: ToolContext) -> bool:
             shutil.copytree(state / "out", ctx.workspace / "out", dirs_exist_ok=True)
             shutil.copytree(state / "cache", ctx.workspace / "cache", dirs_exist_ok=True)
             shutil.rmtree(state)
+            ctx.emit_trace({"event": "cache", "cache": "forge_compile", "hit": True})
             return True
         except OSError:
             shutil.rmtree(state, ignore_errors=True)
             shutil.rmtree(ctx.workspace / "out", ignore_errors=True)
             shutil.rmtree(ctx.workspace / "cache", ignore_errors=True)
+    ctx.emit_trace({"event": "cache", "cache": "forge_compile", "hit": False})
     try:
         proc = subprocess.run(
             ["forge", "build"],
@@ -99,6 +103,8 @@ def prime_compile_cache(ctx: ToolContext) -> bool:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
     if proc.returncode != 0:
+        ctx.emit_trace({"event": "cache_store", "cache": "forge_compile",
+                        "stored": False, "error": "forge build failed"})
         return False
     state = ctx.workspace / ".compile-state"
     try:
@@ -106,6 +112,7 @@ def prime_compile_cache(ctx: ToolContext) -> bool:
         shutil.copytree(ctx.workspace / "out", state / "out")
         shutil.copytree(ctx.workspace / "cache", state / "cache")
         cache_tree_put(ctx.forge_cache_dir, key, state)
+        ctx.emit_trace({"event": "cache_store", "cache": "forge_compile", "stored": True})
     except OSError:
         pass
     finally:

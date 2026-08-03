@@ -34,6 +34,7 @@ import json
 import re
 import sys
 import tempfile
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,6 +45,7 @@ from ..env import EnvValidationError, load_env, validate_provider_env
 from ..providers import build_adapter
 from ..tools.files import ToolContext, ToolError
 from ..tools.foundry import ForgeResult, forge_test
+from ..trace import JsonlTrace
 from .workspace import (
     DATASETS_DIR,
     Fixture,
@@ -369,6 +371,7 @@ def run_agent_eval(
     pipeline: str = "phase0",
     slither_cache_dir: Path | None = None,
     forge_cache_dir: Path | None = None,
+    trace_dir: Path | None = None,
 ) -> list[FixtureRow]:
     from ..pipeline import (  # local import: needs a provider SDK
         audit_phase0,
@@ -393,24 +396,40 @@ def run_agent_eval(
         adapters[profile.provider] = adapter
 
     rows: list[FixtureRow] = []
+    run_id = uuid.uuid4().hex
     for fx in fixtures:
         audit_ws = work_root / fx.name / "audit"
         build_workspace(fx, audit_ws)
+        jsonl_trace = (
+            JsonlTrace(trace_dir / run_id / f"{fx.name}.jsonl", run_id=run_id, fixture=fx.name)
+            if trace_dir is not None else None
+        )
+
+        def _trace(
+            e: dict,
+            _name: str = fx.name,
+            _jsonl: JsonlTrace | None = jsonl_trace,
+            _verbose: bool = verbose,
+        ) -> None:
+            if _jsonl is not None:
+                _jsonl(e)
+            if _verbose:
+                print(f"  [{_name}] {e}", file=sys.stderr)
+
+        trace: TraceFn | None = _trace if jsonl_trace is not None or verbose else None
         ctx = ToolContext(
             workspace=audit_ws,
             forge_timeout=forge_timeout,
             forge_retries=forge_retries,
             slither_cache_dir=slither_cache_dir,
             forge_cache_dir=forge_cache_dir,
+            trace=trace,
         )
         from ..tools.foundry import prime_compile_cache
 
+        if trace:
+            trace({"event": "fixture_start", "pipeline": pipeline, "config": label})
         prime_compile_cache(ctx)
-        trace: TraceFn | None = None
-        if verbose:
-            def _trace(e: dict, _name: str = fx.name) -> None:
-                print(f"  [{_name}] {e}", file=sys.stderr)
-            trace = _trace
         try:
             if pipeline == "phase0":
                 result = audit_phase0(
@@ -426,6 +445,9 @@ def run_agent_eval(
             # expensively is not recorded as the cheap one.
             spent = getattr(exc, "usage", None)
             cause = exc.__cause__ or exc
+            if trace:
+                trace({"event": "fixture_error", "pipeline": pipeline,
+                       "error": {"type": type(cause).__name__, "message": str(cause)}})
             rows.append(
                 FixtureRow(
                     fixture=fx.name,
@@ -453,6 +475,10 @@ def run_agent_eval(
             forge_retries=forge_retries,
         )
         row.report_markdown = result.output.report_markdown
+        if trace:
+            trace({"event": "fixture_complete", "pipeline": pipeline,
+                   "true_positive_findings": row.true_positive_findings,
+                   "confirmed_poc_pass": row.confirmed_poc_pass})
         row.n_refuted = result.n_refuted
         row.usage = _usage_rows(result.usage)
         rows.append(row)
@@ -679,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
                              "(default .cache/forge)")
     parser.add_argument("--no-forge-cache", action="store_true",
                         help="disable the Foundry compile cache (clean-room timing)")
+    parser.add_argument("--trace-dir", type=Path,
+                        help="write redacted JSONL traces under DIR/<run-id>/<fixture>.jsonl")
     parser.add_argument("--max-turns", type=int, default=25)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--json", type=Path, help="write full results JSON here")
@@ -741,6 +769,7 @@ def main(argv: list[str] | None = None) -> int:
                 pipeline=args.pipeline,
                 slither_cache_dir=None if args.no_slither_cache else args.slither_cache_dir,
                 forge_cache_dir=None if args.no_forge_cache else args.forge_cache_dir,
+                trace_dir=args.trace_dir,
             )
         except Exception as exc:  # provider setup / auth / capability failure
             print(f"error: could not start {config.label(args.pipeline)} run: {exc}",
