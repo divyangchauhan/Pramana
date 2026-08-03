@@ -82,12 +82,23 @@ def run_agent(
             # The failing call itself is not counted: a provider that raises
             # generally did not charge for it, and we have no usage for it.
             setattr(exc, "usage", usage)  # noqa: B010 - attach to arbitrary exc
+            if trace:
+                trace(
+                    {
+                        "event": "model_error",
+                        "turn": turn,
+                        "model": model,
+                        "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                    }
+                )
             raise
+        elapsed_s = time.monotonic() - started
         usage += Usage(
             input_tokens=response.usage.get("input_tokens", 0),
             output_tokens=response.usage.get("output_tokens", 0),
             calls=1,
-            elapsed_s=time.monotonic() - started,
+            elapsed_s=elapsed_s,
         )
         messages.append(
             {
@@ -101,7 +112,10 @@ def run_agent(
                 {
                     "event": "assistant_turn",
                     "turn": turn,
+                    "model": model,
+                    "latency_ms": round(elapsed_s * 1000, 3),
                     "text_len": len(response.text),
+                    "output": response.text,
                     "tool_calls": [c.name for c in response.tool_calls],
                     "usage": response.usage,
                 }
@@ -110,17 +124,27 @@ def run_agent(
         if not response.tool_calls:
             return AgentRun(response.text, messages, usage)  # agent is done
 
-        results = [dispatch(call, tool_registry, max_output_chars) for call in response.tool_calls]
+        results = []
+        durations_ms = []
+        for call in response.tool_calls:
+            tool_started = time.monotonic()
+            results.append(dispatch(call, tool_registry, max_output_chars))
+            durations_ms.append(round((time.monotonic() - tool_started) * 1000, 3))
         messages.append({"role": "tool", "content": results})
         if trace:
-            for call, res in zip(response.tool_calls, results, strict=True):
+            for call, res, duration_ms in zip(
+                response.tool_calls, results, durations_ms, strict=True
+            ):
                 trace(
                     {
                         "event": "tool_result",
                         "turn": turn,
+                        "model": model,
                         "tool": call.name,
-                        "arguments": call.arguments,
+                        "input": call.arguments,
+                        "output": res.content,
                         "is_error": res.is_error,
+                        "latency_ms": duration_ms,
                         "output_len": len(res.content),
                     }
                 )

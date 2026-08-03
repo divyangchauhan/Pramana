@@ -81,7 +81,8 @@ def test_second_run_hits_cache_and_skips_analyzer(tmp_path, monkeypatch) -> None
     ws, path = _workspace(tmp_path)
     counter = {"n": 0}
     monkeypatch.setattr(slither_mod.subprocess, "run", _fake_run(counter, _OK_JSON))
-    ctx = ToolContext(workspace=ws, slither_cache_dir=tmp_path / "cache")
+    events = []
+    ctx = ToolContext(workspace=ws, slither_cache_dir=tmp_path / "cache", trace=events.append)
 
     first = slither_mod.run_slither_summary(ctx, path)
     second = slither_mod.run_slither_summary(ctx, path)
@@ -89,6 +90,9 @@ def test_second_run_hits_cache_and_skips_analyzer(tmp_path, monkeypatch) -> None
     assert counter["n"] == 1  # analyzer ran once; second call served from cache
     assert first == second
     assert "reported 1 detector hit(s)" in first
+    assert [(e["cache"], e["hit"]) for e in events] == [
+        ("slither", False), ("slither", True)
+    ]
 
 
 def test_no_cache_dir_reruns_every_time(tmp_path, monkeypatch) -> None:

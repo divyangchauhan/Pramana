@@ -276,6 +276,7 @@ uv run python -m pramana.eval.harness --provider kimi   --model <kimi-k3-id>
 --forge-retries 3                              # retries for transient forge/anvil flakiness
 --no-slither-cache                             # bypass the Slither result cache (clean-room timing)
 --no-forge-cache                               # bypass pristine compile caching
+--trace-dir ./traces                           # redacted JSONL per fixture/run
 ```
 
 </details>
@@ -308,6 +309,7 @@ pramana/
 ├── pipeline.py         # the orchestrator — audit_phase0 / audit_phase1 / audit_phase2
 ├── config.py           # per-role provider/model config, pinned per run
 ├── env.py              # .env auto-load + startup credential validation
+├── trace.py            # versioned, redacted per-fixture JSONL observability
 └── eval/
     ├── datasets/       # the corpus (9 vulnerable fixtures / 14 known bugs / 11 classes + 1 negative control)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
@@ -316,7 +318,7 @@ pramana/
     ├── baseline.py     # folds repeated runs into a baseline; gates later phases
     └── refutation.py   # puts hand-written claims to the verifier, bypassing the finder
 baselines/              # recorded baselines + the agent's audit reports
-tests/                  # 294 offline tests (parsing, grading, isolation, tool scope, refusal, severity cap, reporter governance, corpus integrity)
+tests/                  # 316 offline tests (grading, isolation, governance, caching, tracing, corpus integrity)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -326,16 +328,17 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 294 offline tests, no network/keys
+uv run pytest                      # 316 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```
 
-294 offline tests, no network or keys. Coverage, grouped:
+316 offline tests, no network or keys. Coverage, grouped:
 
 - **Parsing & grading** — boundary JSON parsing; class matching (multi-bug 1:1 + specificity-based resolution); a non-passing PoC or wrong class never counts.
 - **Governance** — the deployment-contingent severity cap (a mutation test fails the suite if the cap is removed from the pipeline); the reporter boundary (prose is woven in, but it can't move a severity, drop a finding, or invent a count — and unreadable output falls back to a deterministic render).
 - **Providers** — canonical↔vendor wire translation for every lab; refusal handling (a safety-layer decline is recorded as a refusal, not a parse error); gateway-vs-first-party pricing; env validation.
+- **Observability** — stable JSONL envelopes; per-fixture/run identity; model and tool timing; cache hits; recursive credential redaction and output bounds.
 - **Corpus integrity** — the negative control replays the real exploit against the patched twin to prove it fails; Foundry transient-failure retries; baseline aggregation over disagreeing runs.
 
 CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).

@@ -8,8 +8,10 @@ reproducible.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 class ToolError(Exception):
@@ -33,6 +35,11 @@ class ToolContext:
     # Cached pristine Foundry compilation state (``out`` + ``cache``). The
     # verifier's generated tests compile incrementally on top of it.
     forge_cache_dir: Path | None = None
+    trace: Callable[[dict[str, Any]], None] | None = None
+
+    def emit_trace(self, event: dict[str, Any]) -> None:
+        if self.trace is not None:
+            self.trace(event)
 
     def resolve(self, path: str) -> Path:
         """Resolve ``path`` against the workspace and reject any escape."""
