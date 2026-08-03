@@ -488,6 +488,72 @@ def run_agent_eval(
 # --- reporting ---------------------------------------------------------------
 
 
+def paired_patch_retention(rows: list[FixtureRow], fixtures: list[Fixture]) -> dict:
+    """Findings detected on a vulnerable fixture but correctly absent on its twin.
+
+    A paired negative control asks a sharper question than recall or the
+    control-false-positive count can answer alone: when the pipeline *proves* a
+    bug on the vulnerable version, does it correctly stop reporting that class on
+    the twin where the bug was fixed? A pipeline that matches the surface pattern
+    rather than the bug scores full recall yet re-raises the same finding on the
+    patch — a paired comparison is what catches it, where a per-fixture number
+    never could.
+
+    For each pair with *both* variants in the run:
+      * detected  — normalized classes credited as true positives on the
+        vulnerable fixture;
+      * resurfaced — classes with a confirmed, PoC-passing finding on the patched
+        twin (which carries no known bugs, so each such finding is a proven false
+        positive);
+      * retained  — detected - resurfaced.
+
+    The corpus rate is pooled retained / detected. Pairs that detected nothing on
+    the vulnerable side contribute nothing — there is nothing to retain — so the
+    denominator counts only classes actually proven on a vulnerable fixture.
+    """
+    by_name = {r.fixture: r for r in rows}
+    pairs: dict[str, dict[str, str]] = {}
+    for f in fixtures:
+        if f.pair and f.variant:
+            pairs.setdefault(f.pair, {})[f.variant] = f.name
+
+    per_pair: list[dict] = []
+    detected_total = 0
+    retained_total = 0
+    for pair, variants in sorted(pairs.items()):
+        v_row = by_name.get(variants.get("vulnerable", ""))
+        p_row = by_name.get(variants.get("patched", ""))
+        if v_row is None or p_row is None:
+            continue  # retention is only defined when both twins were run
+        detected = {d["normalized"] for d in v_row.details if d.get("counted_true_positive")}
+        resurfaced = {
+            d["normalized"]
+            for d in p_row.details
+            if d.get("verdict") == "confirmed" and d.get("poc_passed")
+        }
+        retained = detected - resurfaced
+        detected_total += len(detected)
+        retained_total += len(retained)
+        per_pair.append(
+            {
+                "pair": pair,
+                "vulnerable": v_row.fixture,
+                "patched": p_row.fixture,
+                "detected": sorted(detected),
+                "resurfaced_on_patch": sorted(detected & resurfaced),
+                "retained": sorted(retained),
+            }
+        )
+
+    return {
+        "pairs_evaluated": len(per_pair),
+        "detected_on_vulnerable": detected_total,
+        "retained": retained_total,
+        "rate": (retained_total / detected_total) if detected_total else None,
+        "per_pair": per_pair,
+    }
+
+
 def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> dict:
     total_tp = sum(r.true_positive_findings for r in rows)
     total_known = sum(r.n_known_bugs for r in rows)
@@ -506,6 +572,12 @@ def summarize(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> 
         "negative_control_fixtures": [r.fixture for r in controls],
         "negative_control_false_positives": sum(r.n_confirmed for r in controls),
         "negative_control_proven_false_positives": sum(r.confirmed_poc_pass for r in controls),
+        # Paired metric: of the bug classes proven on each vulnerable fixture,
+        # how many stayed correctly unreported on the patched twin. Needs the
+        # corpus metadata (pair/variant), so it is null when fixtures are absent.
+        "paired_patch_retention": (
+            paired_patch_retention(rows, fixtures) if fixtures else None
+        ),
         # Confirmed findings on a *labeled* fixture that matched no known bug.
         # Recall cannot see these — a pipeline can hold 6/6 while flooding the
         # report. But the count conflates three things and only a human reading
@@ -575,7 +647,7 @@ def _cost_summary(rows: list[FixtureRow]) -> dict:
     }
 
 
-def print_report(rows: list[FixtureRow]) -> None:
+def print_report(rows: list[FixtureRow], fixtures: list[Fixture] | None = None) -> None:
     total_tp = sum(r.true_positive_findings for r in rows)
     total_known = sum(r.n_known_bugs for r in rows)
     print("\n=== Pramana eval ===")
@@ -614,6 +686,19 @@ def print_report(rows: list[FixtureRow]) -> None:
         proven = sum(r.confirmed_poc_pass for r in controls)
         print(f"NEGATIVE CONTROLS ({len(controls)}) — false positives: {fp} "
               f"confirmed, {proven} with a passing PoC")
+
+    if fixtures:
+        ret = paired_patch_retention(rows, fixtures)
+        if ret["pairs_evaluated"]:
+            rate = "-" if ret["rate"] is None else f"{ret['rate']:.2f}"
+            print(f"PAIRED PATCH RETENTION — {ret['retained']}/{ret['detected_on_vulnerable']} "
+                  f"proven classes stayed absent on the patched twin "
+                  f"(rate {rate}, {ret['pairs_evaluated']} pairs)")
+            for p in ret["per_pair"]:
+                if p["resurfaced_on_patch"]:
+                    print(f"    ! {p['pair']}: {', '.join(p['resurfaced_on_patch'])} "
+                          "re-raised on the patched twin — a false positive the "
+                          "vulnerable-only view cannot see")
 
     cost = _cost_summary(rows)
     if cost["by_role"]:
@@ -781,7 +866,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
-    print_report(rows)
+    print_report(rows, fixtures)
     if args.json:
         args.json.write_text(json.dumps(summarize(rows, fixtures), indent=2))
         print(f"wrote {args.json}")

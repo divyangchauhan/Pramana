@@ -1,6 +1,8 @@
 {
   "name": "unchecked-send-payouts",
   "contract": "src/Payouts.sol",
+  "pair": "unchecked-send-payouts",
+  "variant": "vulnerable",
   "reference_poc": "reference/UncheckedSendExploit.t.sol",
   "inspiration": "SWC-104 unchecked call return value (King of the Ether, 2016)",
   "known_bugs": [

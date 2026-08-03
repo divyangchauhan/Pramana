@@ -1,6 +1,8 @@
 {
   "name": "delegatecall-module",
   "contract": "src/ModularVault.sol",
+  "pair": "delegatecall-module",
+  "variant": "vulnerable",
   "reference_poc": "reference/DelegatecallTakeoverExploit.t.sol",
   "inspiration": "SWC-112 delegatecall to untrusted callee (Parity multisig, 2017)",
   "known_bugs": [

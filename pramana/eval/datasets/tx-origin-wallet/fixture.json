@@ -1,6 +1,8 @@
 {
   "name": "tx-origin-wallet",
   "contract": "src/TxOriginWallet.sol",
+  "pair": "tx-origin-wallet",
+  "variant": "vulnerable",
   "reference_poc": "reference/TxOriginExploit.t.sol",
   "inspiration": "SWC-115 tx.origin authentication",
   "known_bugs": [

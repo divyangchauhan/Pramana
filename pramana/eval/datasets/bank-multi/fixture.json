@@ -1,6 +1,8 @@
 {
   "name": "bank-multi",
   "contract": "src/Bank.sol",
+  "pair": "bank-multi",
+  "variant": "vulnerable",
   "inspiration": "Composite: The DAO reentrancy + Parity-style unprotected admin",
   "known_bugs": [
     {

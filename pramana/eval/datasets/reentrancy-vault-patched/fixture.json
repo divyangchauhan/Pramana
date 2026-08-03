@@ -1,6 +1,9 @@
 {
   "name": "reentrancy-vault-patched",
   "contract": "src/EtherStore.sol",
+  "pair": "reentrancy-vault",
+  "variant": "patched",
+  "control_poc": "reference/NoDrainControl.t.sol",
   "inspiration": "Negative control — paired patched twin of reentrancy-vault",
   "known_bugs": []
 }
