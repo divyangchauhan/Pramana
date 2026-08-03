@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 from pathlib import Path
 
 
@@ -66,5 +67,57 @@ def cache_put(cache_dir: Path | None, key: str, value: str) -> None:
         # Best-effort cleanup; the run continues uncached either way.
         try:
             tmp.unlink()
+        except OSError:
+            pass
+
+
+def cache_tree_get(cache_dir: Path | None, key: str, dest: Path) -> bool:
+    """Restore a cached directory tree into ``dest``.
+
+    Returns ``True`` on a hit. As with the text cache, corrupt or unreadable
+    entries degrade to misses rather than breaking the tool run.
+    """
+    if cache_dir is None:
+        return False
+    source = cache_dir / key
+    try:
+        if not source.is_dir():
+            return False
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(source, dest)
+        return True
+    except OSError:
+        try:
+            if dest.exists():
+                shutil.rmtree(dest)
+        except OSError:
+            pass
+        return False
+
+
+def cache_tree_put(cache_dir: Path | None, key: str, source: Path) -> None:
+    """Atomically store ``source`` as a directory-tree cache entry."""
+    if cache_dir is None or not source.is_dir():
+        return
+    dest = cache_dir / key
+    tmp = cache_dir / f"{key}.{os.getpid()}.tmp"
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            return
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        shutil.copytree(source, tmp)
+        try:
+            os.replace(tmp, dest)
+        except OSError:
+            # Another process may have won the race to populate this key.
+            if not dest.exists():
+                raise
+    except OSError:
+        try:
+            if tmp.exists():
+                shutil.rmtree(tmp)
         except OSError:
             pass

@@ -30,6 +30,9 @@ class ToolContext:
     # clean-room measurements; the harness points it at a persistent directory
     # so repeated runs over identical source reuse the analysis (design §9).
     slither_cache_dir: Path | None = None
+    # Cached pristine Foundry compilation state (``out`` + ``cache``). The
+    # verifier's generated tests compile incrementally on top of it.
+    forge_cache_dir: Path | None = None
 
     def resolve(self, path: str) -> Path:
         """Resolve ``path`` against the workspace and reject any escape."""

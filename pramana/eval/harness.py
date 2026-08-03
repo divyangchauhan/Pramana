@@ -368,6 +368,7 @@ def run_agent_eval(
     verbose: bool = False,
     pipeline: str = "phase0",
     slither_cache_dir: Path | None = None,
+    forge_cache_dir: Path | None = None,
 ) -> list[FixtureRow]:
     from ..pipeline import (  # local import: needs a provider SDK
         audit_phase0,
@@ -400,7 +401,11 @@ def run_agent_eval(
             forge_timeout=forge_timeout,
             forge_retries=forge_retries,
             slither_cache_dir=slither_cache_dir,
+            forge_cache_dir=forge_cache_dir,
         )
+        from ..tools.foundry import prime_compile_cache
+
+        prime_compile_cache(ctx)
         trace: TraceFn | None = None
         if verbose:
             def _trace(e: dict, _name: str = fx.name) -> None:
@@ -669,6 +674,11 @@ def main(argv: list[str] | None = None) -> int:
                              "(default .cache/slither)")
     parser.add_argument("--no-slither-cache", action="store_true",
                         help="disable the Slither result cache (clean-room timing)")
+    parser.add_argument("--forge-cache-dir", type=Path, default=Path(".cache/forge"),
+                        help="content cache for pristine Foundry compilation output "
+                             "(default .cache/forge)")
+    parser.add_argument("--no-forge-cache", action="store_true",
+                        help="disable the Foundry compile cache (clean-room timing)")
     parser.add_argument("--max-turns", type=int, default=25)
     parser.add_argument("--max-tokens", type=int, default=16000)
     parser.add_argument("--json", type=Path, help="write full results JSON here")
@@ -730,6 +740,7 @@ def main(argv: list[str] | None = None) -> int:
                 verbose=args.verbose,
                 pipeline=args.pipeline,
                 slither_cache_dir=None if args.no_slither_cache else args.slither_cache_dir,
+                forge_cache_dir=None if args.no_forge_cache else args.forge_cache_dir,
             )
         except Exception as exc:  # provider setup / auth / capability failure
             print(f"error: could not start {config.label(args.pipeline)} run: {exc}",

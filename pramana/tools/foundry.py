@@ -13,14 +13,18 @@ while a definitive pass/fail result is never retried (§9).
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
+from .cache import cache_tree_get, cache_tree_put, content_key
 from .files import ToolContext, ToolError
 
 _SUMMARY_RE = re.compile(r"(\d+)\s+passed;\s+(\d+)\s+failed")
+_COMPILE_CACHE_FORMAT = "pramana-forge-compile-v1"
 
 
 @dataclass
@@ -28,6 +32,85 @@ class ForgeResult:
     ran: bool  # at least one test executed (a definitive pass/fail result)
     passed: bool  # ran and zero failures
     output: str
+
+
+@lru_cache(maxsize=1)
+def _forge_version() -> str:
+    """Return the Forge version used in compile-cache keys."""
+    try:
+        proc = subprocess.run(
+            ["forge", "--version"], capture_output=True, text=True, timeout=10
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return "unknown"
+    return ((proc.stdout or "") + (proc.stderr or "")).strip() or "unknown"
+
+
+def _compile_cache_key(workspace: Path) -> str:
+    """Hash every input to the pristine workspace compilation."""
+    parts: list[str | bytes] = [_COMPILE_CACHE_FORMAT, _forge_version()]
+    inputs: list[tuple[str, Path]] = [
+        (p.name, p) for p in workspace.glob("*.toml") if p.is_file()
+    ]
+    for root_name in ("src", "dependencies"):
+        root = workspace / root_name
+        if root.exists():
+            resolved = root.resolve()
+            inputs.extend(
+                (f"{root_name}/{path.relative_to(resolved)}", path)
+                for path in resolved.rglob("*.sol")
+                if path.is_file()
+            )
+    for name, path in sorted(inputs, key=lambda item: item[0]):
+        parts.extend((name, path.read_bytes()))
+    return content_key(*parts)
+
+
+def prime_compile_cache(ctx: ToolContext) -> bool:
+    """Prepare reusable artifacts for the fixture's pristine source.
+
+    On a hit, restore Foundry's paired ``out`` and ``cache`` trees. On a miss,
+    run ``forge build`` once and store only a successful compilation. Returns
+    whether the pristine build succeeded; callers may continue on failure so
+    the verifier receives Forge's normal diagnostic when it runs its PoC.
+    """
+    if ctx.forge_cache_dir is None:
+        return False
+    key = _compile_cache_key(ctx.workspace)
+    if cache_tree_get(ctx.forge_cache_dir, key, ctx.workspace / ".compile-state"):
+        state = ctx.workspace / ".compile-state"
+        try:
+            shutil.copytree(state / "out", ctx.workspace / "out", dirs_exist_ok=True)
+            shutil.copytree(state / "cache", ctx.workspace / "cache", dirs_exist_ok=True)
+            shutil.rmtree(state)
+            return True
+        except OSError:
+            shutil.rmtree(state, ignore_errors=True)
+            shutil.rmtree(ctx.workspace / "out", ignore_errors=True)
+            shutil.rmtree(ctx.workspace / "cache", ignore_errors=True)
+    try:
+        proc = subprocess.run(
+            ["forge", "build"],
+            capture_output=True,
+            text=True,
+            timeout=ctx.forge_timeout,
+            cwd=ctx.workspace,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    if proc.returncode != 0:
+        return False
+    state = ctx.workspace / ".compile-state"
+    try:
+        state.mkdir()
+        shutil.copytree(ctx.workspace / "out", state / "out")
+        shutil.copytree(ctx.workspace / "cache", state / "cache")
+        cache_tree_put(ctx.forge_cache_dir, key, state)
+    except OSError:
+        pass
+    finally:
+        shutil.rmtree(state, ignore_errors=True)
+    return True
 
 
 def _run_once(workspace: Path, match_path: str, timeout: int) -> ForgeResult:
