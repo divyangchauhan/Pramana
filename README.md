@@ -38,7 +38,8 @@ All 14 labeled bugs ship with a reference exploit. `--self-check` runs the full 
 
 ```
 HEADLINE — true-positive findings confirmed with executable PoCs: 14 / 14 known bugs
-NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
+NEGATIVE CONTROLS (9) — false positives: 0 confirmed, 0 with a passing PoC
+PAIRED PATCH RETENTION — 14/14 proven classes stayed absent on the patched twin (rate 1.00, 9 pairs)
 ```
 
 That is the corpus proving itself, not the agent — so a failure in a live run is the pipeline's, never a broken fixture.
@@ -185,13 +186,13 @@ Nine self-contained vulnerable fixtures holding **14 known bugs across 11 vulner
 | `signature-replay-vault` | signature-replay **+** zero-signer **+** fixed-gas-transfer | SWC-121 — missing nonce |
 | `bank-multi` | reentrancy **+** access-control **+** missing-zero-check | composite three-bug contract — exercises 1:1 matching |
 
-Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` PoC that validates the grader offline. Three of these bugs were [added *because the sweep found them*](#the-eval-audits-itself).
+Each `pramana/eval/datasets/<name>/` holds the vulnerable source (`src/`), a `fixture.json` label set, and a `reference/` PoC that validates the grader offline. Three of these bugs were [added *because the sweep found them*](#the-eval-audits-itself). Every fixture is paired with a `<name>-patched` twin — a genuine, still-functional fix carrying zero known bugs — used as a [negative control](#the-corpus) and to score `paired_patch_retention`.
 
 **The label is the weakest link in the metric.** Two of the three true-positive conditions are executable facts — the agent said "confirmed", the harness re-ran the PoC and watched it pass. The third is string equality on a free-text class name, and models name one bug many ways: a single proven delegatecall storage collision arrived as `unrestricted-delegatecall`, `arbitrary-delegatecall`, `controlled-delegatecall` and plain `access-control`. A grader sensitive to vocabulary partly ranks naming style instead of capability — fatal to a cross-model sweep. Two mechanisms fix it: **specificity-based resolution** (a word that *names* a class beats one that merely qualifies it, then longest match wins) and **per-bug aliases** for names ambiguous no matter how you resolve them (a delegatecall collision genuinely *is* an access-control break — the bug declares `"accepts": ["access-control"]` itself, rather than merging the two classes everywhere). Grading rules are pinned by a `grader_version` alongside the corpus fingerprint. Full mechanics in [`docs/design.md`](docs/design.md).
 
 > **No tells.** Target sources carry only the comments a developer who *didn't know about the bug* would write — they describe intent, not defects. A fixture that documents its own vulnerability would measure reading comprehension, not discovery, so tests reject bug-naming words in target comments.
 
-> **Negative control.** `reentrancy-vault-patched` is an otherwise-identical twin of `reentrancy-vault` whose `withdraw()` applies the effect before the interaction. It declares **zero** known bugs, so every confirmed finding against it is unambiguously a false positive — and handed it, the finder reads the ordering and proposes nothing at all. Its `reference/` holds control tests (the drain reverts *and* honest withdrawals still succeed — a degenerate always-revert "fix" wouldn't pass), and CI replays the real exploit against the twin and requires it to fail, so the control can't silently rot.
+> **Negative controls — one per vulnerable fixture.** Every fixture ships a `<name>-patched` twin: byte-identical in prose (tests enforce that the twins differ *only* in code, so the model can't tell them apart by reading) and fixed in code, declaring **zero** known bugs. Each twin's `reference/` holds a control PoC that both *neutralizes* the original attack and proves benign functionality still works — a degenerate always-revert "fix" wouldn't pass — and CI replays every real exploit against its twin and requires it to fail, so a control can't silently rot. The pairing is explicit in `fixture.json` (`pair` / `variant` / `control_poc`), which feeds a **`paired_patch_retention`** metric: of the bug classes *proven* on each vulnerable fixture, how many stay correctly unreported on the twin. A pipeline that flags the surface pattern rather than the bug scores full recall yet re-raises the finding on the patch — only a paired comparison catches it.
 
 ---
 
@@ -217,19 +218,28 @@ uv run python -m pramana.eval.harness --self-check
 fixture                    cfg                    cand  ref conf  poc+  TP  recall
 ----------------------------------------------------------------------------------
 bank-multi                 reference-poc             3    0    3     3   3    1.00
+bank-multi-patched         reference-poc             0    0    0     0   0       -
 delegatecall-module        reference-poc             1    0    1     1   1    1.00
+delegatecall-module-patched reference-poc            0    0    0     0   0       -
 reentrancy-vault           reference-poc             1    0    1     1   1    1.00
 reentrancy-vault-patched   reference-poc             0    0    0     0   0       -
 signature-replay-vault     reference-poc             3    0    3     3   3    1.00
+signature-replay-vault-patched reference-poc         0    0    0     0   0       -
 tx-origin-wallet           reference-poc             1    0    1     1   1    1.00
+tx-origin-wallet-patched   reference-poc             0    0    0     0   0       -
 unchecked-overflow-token   reference-poc             1    0    1     1   1    1.00
+unchecked-overflow-token-patched reference-poc       0    0    0     0   0       -
 unchecked-send-payouts     reference-poc             2    0    2     2   2    1.00
+unchecked-send-payouts-patched reference-poc         0    0    0     0   0       -
 unprotected-owner          reference-poc             1    0    1     1   1    1.00
+unprotected-owner-patched  reference-poc             0    0    0     0   0       -
 weak-randomness-lottery    reference-poc             1    0    1     1   1    1.00
+weak-randomness-lottery-patched reference-poc        0    0    0     0   0       -
 ----------------------------------------------------------------------------------
 
 HEADLINE — true-positive findings confirmed with executable PoCs: 14 / 14 known bugs
-NEGATIVE CONTROLS (1) — false positives: 0 confirmed, 0 with a passing PoC
+NEGATIVE CONTROLS (9) — false positives: 0 confirmed, 0 with a passing PoC
+PAIRED PATCH RETENTION — 14/14 proven classes stayed absent on the patched twin (rate 1.00, 9 pairs)
 ```
 
 A `recall` of `-` marks a negative control: no known bugs, so recall is undefined and the number that matters is its false-positive count.
@@ -311,14 +321,14 @@ pramana/
 ├── env.py              # .env auto-load + startup credential validation
 ├── trace.py            # versioned, redacted per-fixture JSONL observability
 └── eval/
-    ├── datasets/       # the corpus (9 vulnerable fixtures / 14 known bugs / 11 classes + 1 negative control)
+    ├── datasets/       # the corpus (9 vulnerable fixtures / 14 known bugs / 11 classes + 9 paired patched controls)
     ├── foundry_template/ # foundry.toml + soldeer.lock (forge-std pinned)
     ├── workspace.py    # per-run Foundry workspaces
     ├── harness.py      # runs audit() over fixtures, counts true positives
     ├── baseline.py     # folds repeated runs into a baseline; gates later phases
     └── refutation.py   # puts hand-written claims to the verifier, bypassing the finder
 baselines/              # recorded baselines + the agent's audit reports
-tests/                  # 316 offline tests (grading, isolation, governance, caching, tracing, corpus integrity)
+tests/                  # 367 offline tests (grading, isolation, governance, caching, tracing, corpus integrity)
 .github/workflows/ci.yml  # ruff + pytest + self-check on every push
 docs/design.md          # full system design & staged build plan
 ```
@@ -328,18 +338,18 @@ docs/design.md          # full system design & staged build plan
 ## Quality
 
 ```bash
-uv run pytest                      # 316 offline tests, no network/keys
+uv run pytest                      # 367 offline tests, no network/keys
 uv run ruff check pramana tests    # lint
 uv run pyright pramana tests       # type check (clean)
 ```
 
-316 offline tests, no network or keys. Coverage, grouped:
+367 offline tests, no network or keys. Coverage, grouped:
 
 - **Parsing & grading** — boundary JSON parsing; class matching (multi-bug 1:1 + specificity-based resolution); a non-passing PoC or wrong class never counts.
 - **Governance** — the deployment-contingent severity cap (a mutation test fails the suite if the cap is removed from the pipeline); the reporter boundary (prose is woven in, but it can't move a severity, drop a finding, or invent a count — and unreadable output falls back to a deterministic render).
 - **Providers** — canonical↔vendor wire translation for every lab; refusal handling (a safety-layer decline is recorded as a refusal, not a parse error); gateway-vs-first-party pricing; env validation.
 - **Observability** — stable JSONL envelopes; per-fixture/run identity; model and tool timing; cache hits; recursive credential redaction and output bounds.
-- **Corpus integrity** — the negative control replays the real exploit against the patched twin to prove it fails; Foundry transient-failure retries; baseline aggregation over disagreeing runs.
+- **Corpus integrity** — every fixture's paired patched twin replays the real exploit to prove it fails *and* runs a control PoC proving the fix is functional (not always-revert); twins must differ only in code, not commentary; `paired_patch_retention` scoring; Foundry transient-failure retries; baseline aggregation over disagreeing runs.
 
 CI runs the full suite plus the offline self-check on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
@@ -352,7 +362,7 @@ Built as a **vertical slice first**, deepening before it widens — every phase 
 - **Phase 0 — Vertical slice** ✅ — single provider-neutral agent (find → prove → report), the eval harness, and the real-world corpus. [Baseline](baselines/phase-0/).
 - **Phase 1 — Split the verifier** ✅ — a context-isolated verifier that sees only the bare claim, so verification can't be biased by the hypothesis. Gated against the [Phase 0 baseline](baselines/phase-0/) and recorded as the [Phase 1 gate reference](baselines/phase-1-8693741ffa57/).
 - **Phase 2 — Routing, governance & the reporter** ✅ — the [four-model sweep](#four-models-one-unmodified-pipeline) with per-role routing and subscription-proxy gateways; a **deployment-contingent severity cap**; the corpus expansion the sweep surfaced; and the **reporter** (Nirnaya) — the third `run_agent` role and the only stage that sees every verdict at once, so it catches cross-finding duplicates. It authors prose (description, impact, remediation, executive summary, duplicate links); severity, PoC path, verdict and counts stay [governed in code](#why-the-design-holds-up). Slither output and pristine Foundry compilation state are content-cached across runs.
-- **Phase 3 — Scale & harden** — public benchmarks (Code4rena / Sherlock / DeFiHackLabs), a full paired vulnerable/patched set, and structured observability.
+- **Phase 3 — Scale & harden** — a **full paired vulnerable/patched set** ✅ (a patched negative control for every fixture, linked in metadata and scored by `paired_patch_retention`); next, public benchmarks (Code4rena / Sherlock / a curated DeFiHackLabs slice) integrated under the same paired-fixture contract, and deeper structured observability.
 
 The three agents have fixed identities — **Anumana** (finder / inference), **Khandana** (verifier / refutation), **Nirnaya** (reporter / conclusion) — the three *pramāṇas* by which a finding becomes proven knowledge.
 

@@ -51,6 +51,9 @@ class Fixture:
     contract: str  # workspace-relative, e.g. "src/EtherStore.sol"
     reference_poc: str | None
     known_bugs: list[KnownBug]
+    pair: str | None = None
+    variant: str | None = None  # "vulnerable" or "patched"
+    control_poc: str | None = None
 
     @property
     def src_dir(self) -> Path:
@@ -72,6 +75,9 @@ def load_fixtures(
                 contract=data["contract"],
                 reference_poc=data.get("reference_poc"),
                 known_bugs=[KnownBug(**b) for b in data.get("known_bugs", [])],
+                pair=data.get("pair"),
+                variant=data.get("variant"),
+                control_poc=data.get("control_poc"),
             )
         )
     return fixtures
@@ -95,6 +101,7 @@ def corpus_fingerprint(fixtures: list[Fixture]) -> str:
     digest = hashlib.sha256()
     for fixture in sorted(fixtures, key=lambda f: f.name):
         digest.update(fixture.name.encode())
+        digest.update(f"{fixture.pair}:{fixture.variant}:{fixture.control_poc}".encode())
         for sol in sorted(fixture.src_dir.glob("*.sol")):
             digest.update(sol.name.encode())
             digest.update(sol.read_bytes())

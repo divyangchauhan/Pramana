@@ -1,0 +1,9 @@
+{
+  "name": "tx-origin-wallet-patched",
+  "contract": "src/TxOriginWallet.sol",
+  "pair": "tx-origin-wallet",
+  "variant": "patched",
+  "control_poc": "reference/TxOriginWalletControl.t.sol",
+  "inspiration": "Patched twin of tx-origin-wallet",
+  "known_bugs": []
+}

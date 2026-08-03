@@ -1,0 +1,9 @@
+{
+  "name": "signature-replay-vault-patched",
+  "contract": "src/SignedVault.sol",
+  "pair": "signature-replay-vault",
+  "variant": "patched",
+  "control_poc": "reference/SignedVaultControl.t.sol",
+  "inspiration": "Patched twin of signature-replay-vault",
+  "known_bugs": []
+}
