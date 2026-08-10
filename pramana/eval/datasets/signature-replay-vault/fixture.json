@@ -1,6 +1,8 @@
 {
   "name": "signature-replay-vault",
   "contract": "src/SignedVault.sol",
+  "pair": "signature-replay-vault",
+  "variant": "vulnerable",
   "reference_poc": "reference/SignatureReplayExploit.t.sol",
   "inspiration": "SWC-121 missing protection against signature replay",
   "known_bugs": [

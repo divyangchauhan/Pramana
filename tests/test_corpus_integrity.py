@@ -65,14 +65,67 @@ def test_target_source_comments_do_not_name_the_bug(path):
     )
 
 
-def test_paired_twins_differ_only_in_code_not_commentary():
+def _paired_twins() -> list[tuple[str, str]]:
+    """(vulnerable, patched) fixture-name pairs for every twin in the corpus."""
+    by_pair: dict[str, dict[str, str]] = {}
+    for f in load_fixtures():
+        if f.pair and f.variant:
+            by_pair.setdefault(f.pair, {})[f.variant] = f.name
+    return [
+        (v["vulnerable"], v["patched"])
+        for _, v in sorted(by_pair.items())
+        if "vulnerable" in v and "patched" in v
+    ]
+
+
+PAIRS = _paired_twins()
+
+
+def test_every_vulnerable_fixture_has_a_patched_twin():
+    """The corpus goal for this phase: a patched negative control for each
+    vulnerable fixture. A vulnerable fixture with no twin is a gap in the
+    false-positive evidence, so the list is asserted whole rather than sampled."""
+    vulnerable = {f.name for f in load_fixtures() if f.variant == "vulnerable"}
+    paired = {v for v, _ in PAIRS}
+    missing = sorted(vulnerable - paired)
+    assert not missing, f"vulnerable fixtures without a patched twin: {missing}"
+    assert len(PAIRS) == len(vulnerable), "a pair is missing one of its variants"
+
+
+@pytest.mark.parametrize(
+    "vulnerable,patched", PAIRS, ids=[f"{v}->{p}" for v, p in PAIRS]
+)
+def test_paired_twins_differ_only_in_code_not_commentary(vulnerable, patched):
     """The negative control is only valid if it is indistinguishable from its
-    vulnerable twin by prose. If the patched copy advertised its own safety,
-    the model could pass by reading rather than reasoning."""
-    vulnerable = _fixture_source("reentrancy-vault")
-    patched = _fixture_source("reentrancy-vault-patched")
-    assert _comments(vulnerable) == _comments(patched)
-    assert vulnerable != patched, "the twins must still differ in code"
+    vulnerable twin by prose. If the patched copy advertised its own safety, or
+    merely dropped the comments the vulnerable one carries, the model could tell
+    them apart by reading rather than reasoning."""
+    v_src = _fixture_source(vulnerable)
+    p_src = _fixture_source(patched)
+    assert _comments(v_src) == _comments(p_src), (
+        f"{vulnerable} and {patched} differ in commentary; twins must differ "
+        "only in code"
+    )
+    assert v_src != p_src, "the twins must still differ in code"
+
+
+def test_pairing_metadata_is_consistent():
+    """`pair`/`variant`/`control_poc` are the only link between a bug and its
+    negative control, and the paired_patch_retention metric trusts them. A
+    patched twin that still declares known bugs, or names a control PoC that is
+    not on disk, silently corrupts that metric."""
+    for f in load_fixtures():
+        if f.variant is None:
+            assert f.pair is None, f"{f.name}: pair set without a variant"
+            continue
+        assert f.variant in ("vulnerable", "patched"), f"{f.name}: bad variant {f.variant!r}"
+        assert f.pair, f"{f.name}: variant set without a pair"
+        if f.variant == "patched":
+            assert f.known_bugs == [], f"{f.name}: a patched twin must carry no known bugs"
+            assert f.control_poc, f"{f.name}: patched twin has no control_poc"
+            assert (f.dir / f.control_poc).is_file(), f"{f.name}: missing {f.control_poc}"
+        else:
+            assert f.known_bugs, f"{f.name}: a vulnerable fixture must declare known bugs"
 
 
 def test_fingerprint_changes_when_a_target_source_changes(tmp_path):

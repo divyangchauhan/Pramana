@@ -1,6 +1,8 @@
 {
   "name": "unprotected-owner",
   "contract": "src/Wallet.sol",
+  "pair": "unprotected-owner",
+  "variant": "vulnerable",
   "reference_poc": "reference/WalletExploit.t.sol",
   "inspiration": "Parity multisig unprotected initializer (2017)",
   "known_bugs": [

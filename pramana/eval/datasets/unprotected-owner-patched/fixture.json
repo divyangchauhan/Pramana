@@ -1,0 +1,9 @@
+{
+  "name": "unprotected-owner-patched",
+  "contract": "src/Wallet.sol",
+  "pair": "unprotected-owner",
+  "variant": "patched",
+  "control_poc": "reference/WalletControl.t.sol",
+  "inspiration": "Patched twin of unprotected-owner",
+  "known_bugs": []
+}

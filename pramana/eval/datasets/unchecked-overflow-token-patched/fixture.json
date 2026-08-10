@@ -1,0 +1,9 @@
+{
+  "name": "unchecked-overflow-token-patched",
+  "contract": "src/Token.sol",
+  "pair": "unchecked-overflow-token",
+  "variant": "patched",
+  "control_poc": "reference/TokenControl.t.sol",
+  "inspiration": "Patched twin of unchecked-overflow-token",
+  "known_bugs": []
+}

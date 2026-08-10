@@ -1,0 +1,9 @@
+{
+  "name": "bank-multi-patched",
+  "contract": "src/Bank.sol",
+  "pair": "bank-multi",
+  "variant": "patched",
+  "control_poc": "reference/BankControl.t.sol",
+  "inspiration": "Patched twin of bank-multi",
+  "known_bugs": []
+}

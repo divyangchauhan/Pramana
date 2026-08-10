@@ -1,6 +1,8 @@
 {
   "name": "weak-randomness-lottery",
   "contract": "src/Lottery.sol",
+  "pair": "weak-randomness-lottery",
+  "variant": "vulnerable",
   "reference_poc": "reference/PredictableDrawExploit.t.sol",
   "inspiration": "SWC-120 weak sources of randomness from chain attributes",
   "known_bugs": [

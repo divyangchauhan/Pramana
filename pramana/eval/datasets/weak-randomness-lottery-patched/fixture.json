@@ -1,0 +1,9 @@
+{
+  "name": "weak-randomness-lottery-patched",
+  "contract": "src/Lottery.sol",
+  "pair": "weak-randomness-lottery",
+  "variant": "patched",
+  "control_poc": "reference/LotteryControl.t.sol",
+  "inspiration": "Patched twin of weak-randomness-lottery",
+  "known_bugs": []
+}

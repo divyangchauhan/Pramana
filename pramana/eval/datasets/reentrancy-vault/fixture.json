@@ -1,6 +1,8 @@
 {
   "name": "reentrancy-vault",
   "contract": "src/EtherStore.sol",
+  "pair": "reentrancy-vault",
+  "variant": "vulnerable",
   "reference_poc": "reference/EtherStoreExploit.t.sol",
   "inspiration": "The DAO (2016)",
   "known_bugs": [

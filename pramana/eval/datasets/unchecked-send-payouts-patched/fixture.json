@@ -1,0 +1,9 @@
+{
+  "name": "unchecked-send-payouts-patched",
+  "contract": "src/Payouts.sol",
+  "pair": "unchecked-send-payouts",
+  "variant": "patched",
+  "control_poc": "reference/PayoutsControl.t.sol",
+  "inspiration": "Patched twin of unchecked-send-payouts",
+  "known_bugs": []
+}

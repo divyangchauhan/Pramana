@@ -1,6 +1,8 @@
 {
   "name": "unchecked-overflow-token",
   "contract": "src/Token.sol",
+  "pair": "unchecked-overflow-token",
+  "variant": "vulnerable",
   "reference_poc": "reference/TokenExploit.t.sol",
   "inspiration": "BeautyChain (BEC) batchOverflow (2018)",
   "known_bugs": [

@@ -1,0 +1,9 @@
+{
+  "name": "delegatecall-module-patched",
+  "contract": "src/ModularVault.sol",
+  "pair": "delegatecall-module",
+  "variant": "patched",
+  "control_poc": "reference/ModularVaultControl.t.sol",
+  "inspiration": "Patched twin of delegatecall-module",
+  "known_bugs": []
+}
