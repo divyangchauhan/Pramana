@@ -80,11 +80,14 @@ contract BankControlTest is Test {
         assertEq(address(bank).balance, 0, "bank retained funds it paid out");
     }
 
-    /// The legitimate admin can still sweep to a real recipient.
-    function testAdminCanSweepToRecipient() public {
+    /// The legitimate admin can still recover unaccounted ETH without touching
+    /// any depositor's recorded funds.
+    function testAdminCanSweepExcessToRecipient() public {
         address payable treasury = payable(makeAddr("treasury"));
+        vm.deal(address(bank), 7 ether); // 5 accounted + 2 forced/unaccounted
         bank.sweep(treasury); // this == admin
-        assertEq(treasury.balance, 5 ether, "admin could not sweep to a recipient");
-        assertEq(address(bank).balance, 0, "bank not fully swept");
+        assertEq(treasury.balance, 2 ether, "admin could not recover excess ETH");
+        assertEq(address(bank).balance, 5 ether, "depositor funds were swept");
+        assertEq(bank.balances(alice), 5 ether, "alice's balance changed");
     }
 }

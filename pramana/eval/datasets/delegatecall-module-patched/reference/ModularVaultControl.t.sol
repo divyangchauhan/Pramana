@@ -57,5 +57,16 @@ contract ModularVaultControlTest is Test {
         assertEq(address(this).balance, before + 8 ether, "owner did not receive funds");
     }
 
+    /// Even an owner-selected module executes in its own storage context, so
+    /// it cannot overwrite the vault's owner slot.
+    function testOwnerSelectedModuleCannotRewriteVaultStorage() public {
+        SeizeModule module = new SeizeModule();
+        vault.execute(address(module), abi.encodeWithSignature("seize()"));
+
+        assertEq(vault.owner(), address(this), "vault ownership was overwritten");
+        assertEq(module.owner(), address(vault), "module did not run in its own context");
+        assertEq(address(vault).balance, 8 ether, "vault balance changed");
+    }
+
     receive() external payable {}
 }

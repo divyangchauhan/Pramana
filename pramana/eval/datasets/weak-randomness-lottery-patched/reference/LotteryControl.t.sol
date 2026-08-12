@@ -33,7 +33,7 @@ contract LotteryControlTest is Test {
     Lottery lottery;
 
     function setUp() public {
-        lottery = new Lottery();
+        lottery = new Lottery(); // deployer (this test) is the randomness provider
         vm.deal(address(lottery), 9 ether); // pot from previous entries
     }
 
@@ -62,16 +62,15 @@ contract LotteryControlTest is Test {
         assertEq(address(lottery).balance, 10 ether, "pot changed at entry time");
     }
 
-    /// A same-block claim is rejected: the draw is not ready until the entry
-    /// block has passed, so the result cannot be known when funds are committed.
-    function testClaimInEntryBlockReverts() public {
+    /// Only the configured provider can settle an entry.
+    function testPlayerCannotSupplyRandomness() public {
         address player = makeAddr("player");
         vm.deal(player, 1 ether);
-        vm.startPrank(player);
+        vm.prank(player);
         lottery.enter{value: 1 ether}();
-        vm.expectRevert(bytes("draw not ready"));
-        lottery.claim();
-        vm.stopPrank();
+        vm.prank(player);
+        vm.expectRevert(bytes("not provider"));
+        lottery.fulfillRandomness(player, 0);
     }
 
     /// Guards against a degenerate always-revert "fix": an honest player can
@@ -84,10 +83,22 @@ contract LotteryControlTest is Test {
         lottery.enter{value: 1 ether}();
         assertEq(lottery.entryBlock(player), block.number, "entry not recorded");
 
-        vm.roll(block.number + 1); // the draw block has now passed
-        vm.prank(player);
-        lottery.claim(); // must not revert whether the player wins or loses
+        lottery.fulfillRandomness(player, 1); // a losing draw still settles
 
         assertEq(lottery.entryBlock(player), 0, "entry not cleared after claim");
+    }
+
+    /// A pending ticket can always be cleared, so delayed provider delivery
+    /// cannot permanently lock the player's address.
+    function testPendingEntryCanBeCancelled() public {
+        address player = makeAddr("player");
+        vm.deal(player, 1 ether);
+        vm.prank(player);
+        lottery.enter{value: 1 ether}();
+
+        vm.roll(block.number + 1000);
+        vm.prank(player);
+        lottery.cancel();
+        assertEq(lottery.entryBlock(player), 0, "entry not cleared by cancel");
     }
 }
