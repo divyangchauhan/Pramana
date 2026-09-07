@@ -1,0 +1,437 @@
+{
+  "label": "Phase 2 paired corpus \u2014 Claude Opus 4.8 medium",
+  "captured_utc": "2026-08-11T17:59:53Z",
+  "commit": "4994534e95702409cd7b8e8549042d82a6d5abba",
+  "commit_short": "4994534",
+  "commit_url": "https://github.com/divyangchauhan/Pramana/commit/4994534e95702409cd7b8e8549042d82a6d5abba",
+  "working_tree_dirty": false,
+  "configs": [
+    "phase2/anthropic:claude-opus-4-8@medium"
+  ],
+  "corpus_fingerprint": "15f1f83c2b28",
+  "grader_version": 3,
+  "n_runs": 3,
+  "total_known_bugs": 14,
+  "true_positives_per_run": [
+    10,
+    11,
+    10
+  ],
+  "true_positives_min": 10,
+  "true_positives_max": 11,
+  "true_positives_mean": 10.33,
+  "negative_control_false_positives_per_run": [
+    2,
+    2,
+    0
+  ],
+  "negative_control_proven_false_positives_per_run": [
+    2,
+    2,
+    0
+  ],
+  "unmatched_confirmed_per_run": [
+    1,
+    0,
+    0
+  ],
+  "fully_deterministic": false,
+  "fixtures": [
+    {
+      "fixture": "bank-multi",
+      "n_known_bugs": 3,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        2,
+        2,
+        2
+      ],
+      "confirmed_per_run": [
+        2,
+        2,
+        2
+      ],
+      "candidates_per_run": [
+        2,
+        2,
+        2
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "bank-multi-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        0
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "delegatecall-module",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "delegatecall-module-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "reentrancy-vault",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "reentrancy-vault-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "signature-replay-vault",
+      "n_known_bugs": 3,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        2,
+        1
+      ],
+      "confirmed_per_run": [
+        2,
+        2,
+        1
+      ],
+      "candidates_per_run": [
+        2,
+        2,
+        1
+      ],
+      "stable_across_runs": false,
+      "errors": []
+    },
+    {
+      "fixture": "signature-replay-vault-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "tx-origin-wallet",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "tx-origin-wallet-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unchecked-overflow-token",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unchecked-overflow-token-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unchecked-send-payouts",
+      "n_known_bugs": 2,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unchecked-send-payouts-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unprotected-owner",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "unprotected-owner-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        0,
+        0,
+        0
+      ],
+      "candidates_per_run": [
+        0,
+        0,
+        0
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "weak-randomness-lottery",
+      "n_known_bugs": 1,
+      "is_negative_control": false,
+      "true_positives_per_run": [
+        1,
+        1,
+        1
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        1
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    },
+    {
+      "fixture": "weak-randomness-lottery-patched",
+      "n_known_bugs": 0,
+      "is_negative_control": true,
+      "true_positives_per_run": [
+        0,
+        0,
+        0
+      ],
+      "confirmed_per_run": [
+        1,
+        1,
+        0
+      ],
+      "candidates_per_run": [
+        1,
+        1,
+        1
+      ],
+      "stable_across_runs": true,
+      "errors": []
+    }
+  ]
+}
