@@ -102,7 +102,6 @@ Three models were evaluated with the full finder–verifier–reporter pipeline 
 
 The control counts are findings with passing PoCs that the harness classified as false positives because those fixtures had no bug labels. Review of the recurring findings identified residual vulnerabilities in the lottery, bank, and delegatecall patches; [the subsequent fixes](https://github.com/divyangchauhan/Pramana/pull/21) changed those contracts and the corpus fingerprint.
 
-No model sweep on the corrected corpus (`776da97f2e2d`) is committed yet. The reference self-check above validates the fixtures and grading path; it does not establish that live agent control findings have dropped to zero. Compare runs only when corpus fingerprints and grader versions match.
 
 To record three runs of the full pipeline on the current corpus:
 
