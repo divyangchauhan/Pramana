@@ -92,13 +92,17 @@ NEGATIVE CONTROLS (9) — false positives: 0 confirmed, 0 with a passing PoC
 PAIRED PATCH RETENTION — 14/14 proven classes stayed absent on the patched twin (rate 1.00, 9 pairs)
 ```
 
-The latest committed 14-bug agent baseline uses an older corpus with only one patched control:
+Three models were evaluated with the full finder–verifier–reporter pipeline (`phase2`) over all 18 fixtures, with three runs each at `effort=medium`. These baselines use corpus `15f1f83c2b28` and grader version `3`, before fixes to three patched contracts:
 
-| Recorded configuration | Corpus | True positives, three runs | Control false positives, three runs |
+| Model and access | Baseline | True positives / 14, three runs | Recorded control FPs, three runs |
 |---|---|---|---|
-| `phase1/anthropic:claude-opus-4-8@medium` | `8693741ffa57` | 11/14, 11/14, 11/14 | 0, 0, 0 |
+| Claude Opus 4.8, Anthropic | [Record](baselines/phase-2-paired-claude-opus-4-8/) | 10, 11, 10 | 2, 2, 0 |
+| GPT-5.5, OpenAI gateway | [Record](baselines/phase-2-paired-gpt-5.5/) | 11, 11, 11 | 2, 2, 1 |
+| Kimi K3, Moonshot | [Record](baselines/phase-2-paired-kimi-k3/) | 11, 12, 11 | 3, 1, 1 |
 
-The [baseline record](baselines/phase-1-8693741ffa57/README.md) includes reports and [saved run data](baselines/phase-1-8693741ffa57/runs/). These results do not measure the reporter or the full current set of patched controls. Comparisons require matching corpus fingerprints and grader versions.
+The control counts are findings with passing PoCs that the harness classified as false positives because those fixtures had no bug labels. Review of the recurring findings identified residual vulnerabilities in the lottery, bank, and delegatecall patches; [the subsequent fixes](https://github.com/divyangchauhan/Pramana/pull/21) changed those contracts and the corpus fingerprint.
+
+No model sweep on the corrected corpus (`776da97f2e2d`) is committed yet. The reference self-check above validates the fixtures and grading path; it does not establish that live agent control findings have dropped to zero. Compare runs only when corpus fingerprints and grader versions match.
 
 To record three runs of the full pipeline on the current corpus:
 
@@ -155,7 +159,7 @@ The three agent roles, provider routing, caches, structured traces, paired fixtu
 - **Interrupted verification:** a verifier that exhausts its model-turn budget or raises a provider error aborts that fixture's audit. It does not currently preserve the partial audit and mark only the affected claim `inconclusive`.
 - **Model preflight:** adapters check model availability where the endpoint supports it. They do not establish tool-calling and structured-output support before a run.
 
-A passing PoC demonstrates the behavior encoded in that test. Its assertions, deployment assumptions, and impact still need review. Duplicate annotations do not remove findings or change counts. No committed full-pipeline baseline covers the current 18-fixture corpus.
+A passing PoC demonstrates the behavior encoded in that test. Its assertions, deployment assumptions, and impact still need review. Duplicate annotations do not remove findings or change counts. The committed full-pipeline baselines cover all 18 fixtures before the three patched-contract fixes; a model rerun on the corrected corpus is still needed.
 
 ## Development
 
