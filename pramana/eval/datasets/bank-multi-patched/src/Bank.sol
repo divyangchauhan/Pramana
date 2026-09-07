@@ -8,6 +8,7 @@ pragma solidity ^0.8.0;
 contract Bank {
     mapping(address => uint256) public balances;
     address public admin;
+    uint256 public totalDeposits;
 
     constructor() {
         admin = msg.sender;
@@ -16,6 +17,7 @@ contract Bank {
     /// @notice Deposit ETH and credit it to the sender.
     function deposit() external payable {
         balances[msg.sender] += msg.value;
+        totalDeposits += msg.value;
     }
 
     /// @notice Withdraw the caller's entire balance.
@@ -23,6 +25,7 @@ contract Bank {
         uint256 bal = balances[msg.sender];
         require(bal > 0, "no balance");
         balances[msg.sender] = 0;
+        totalDeposits -= bal;
         (bool ok, ) = msg.sender.call{value: bal}("");
         require(ok, "transfer failed");
     }
@@ -38,7 +41,9 @@ contract Bank {
     function sweep(address payable to) external {
         require(msg.sender == admin, "not admin");
         require(to != address(0), "zero recipient");
-        (bool ok, ) = to.call{value: address(this).balance}("");
+        uint256 excess = address(this).balance - totalDeposits;
+        require(excess > 0, "no excess");
+        (bool ok, ) = to.call{value: excess}("");
         require(ok, "transfer failed");
     }
 

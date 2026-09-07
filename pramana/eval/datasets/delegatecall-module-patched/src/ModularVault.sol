@@ -18,7 +18,7 @@ contract ModularVault {
         require(msg.sender == owner, "not owner");
         require(module.code.length > 0, "not a module");
         lastModule = module;
-        (bool ok, ) = module.delegatecall(data);
+        (bool ok, ) = module.call(data);
         require(ok, "module call failed");
     }
 
