@@ -44,7 +44,8 @@ from .contracts import (
 )
 from .cost import Usage, model_key
 from .providers.base import LLMAdapter, Message
-from .tools.files import ToolContext
+from .tools.files import ToolContext, ToolError
+from .tools.foundry import ForgeResult, forge_test
 from .tools.registry import build_tool_registry
 from .tools.slither import run_slither_summary
 
@@ -110,6 +111,85 @@ def _ground(ctx: ToolContext, contract_path: str) -> str:
         return f"(slither unavailable: {exc})"
 
 
+def _check_poc(ctx: ToolContext, poc_path: str | None) -> ForgeResult:
+    """Check the final PoC file, independently of the model's tool-use claims."""
+    if not poc_path:
+        return ForgeResult(ran=False, passed=False, output="No PoC path was provided.")
+    try:
+        path = ctx.resolve(_normalize_ws_path(poc_path))
+        relative = ctx.rel(path)
+        if not path.is_file():
+            return ForgeResult(ran=False, passed=False, output="PoC file not found.")
+        if not relative.startswith("test/") or not relative.endswith(".t.sol"):
+            return ForgeResult(ran=False, passed=False, output="PoC must be a test/*.t.sol file.")
+        if any(char in relative for char in "*?[]{}"):
+            return ForgeResult(ran=False, passed=False, output="PoC path must name one test file.")
+        return forge_test(ctx.workspace, relative, ctx.forge_timeout, retries=ctx.forge_retries)
+    except (ToolError, OSError, ValueError) as exc:
+        return ForgeResult(ran=False, passed=False, output=f"PoC check failed: {exc}")
+
+
+def _checked_verdict(verdict: Verdict, check: ForgeResult) -> Verdict:
+    if verdict.verdict != "confirmed" or (check.ran and check.passed):
+        return verdict
+    return verdict.model_copy(update={
+        "verdict": "inconclusive",
+        "severity": None,
+        "evidence": (
+            "Independent PoC check did not pass; the model's confirmation was rejected.\n"
+            + check.output[-4000:]
+        ),
+    })
+
+
+def reconcile_confirmations(result: AuditResult, checks: Mapping[str, ForgeResult]) -> None:
+    """Apply independent checks to the public results before scoring or delivery.
+
+    If a later pristine-source rerun fails, discard stale reporter prose and
+    rebuild the entire report from the corrected verdicts. A failed rerun is
+    inconclusive, not proof that the underlying claim is false.
+    """
+    changed = False
+    updated: list[Phase0Finding] = []
+    for finding in result.output.findings:
+        check = checks.get(finding.id)
+        if (
+            finding.verdict == "confirmed" and check is not None
+            and not (check.ran and check.passed)
+        ):
+            verdict = _checked_verdict(Verdict(finding_id=finding.id, verdict="confirmed"), check)
+            finding = finding.model_copy(update={
+                "verdict": verdict.verdict, "severity": None, "evidence": verdict.evidence,
+            })
+            changed = True
+        updated.append(finding)
+    if not changed:
+        return
+
+    by_id = {f.id: f for f in result.findings}
+    previous = {v.finding_id: v for v in result.verdicts}
+    verdicts = []
+    for finding in updated:
+        by_id.setdefault(finding.id, Finding(
+            id=finding.id, contract=finding.contract, location=finding.location,
+            vuln_class=finding.vuln_class, hypothesis=finding.hypothesis,
+        ))
+        verdicts.append(Verdict(
+            finding_id=finding.id, verdict=finding.verdict, severity=finding.severity,
+            poc_path=finding.poc_path, evidence=finding.evidence,
+            deployment_contingent=finding.deployment_contingent,
+            attempts=previous[finding.id].attempts if finding.id in previous else 0,
+        ))
+    result.findings = list(by_id.values())
+    result.verdicts = verdicts
+    result.n_confirmed = sum(v.verdict == "confirmed" for v in verdicts)
+    result.n_inconclusive = sum(v.verdict == "inconclusive" for v in verdicts)
+    result.n_refuted = sum(v.verdict == "refuted" for v in verdicts)
+    result.output = Phase0Output(
+        findings=updated, report_markdown=_render_report(by_id, verdicts),
+    )
+
+
 def audit_phase0(
     adapter: LLMAdapter,
     config: AgentConfig,
@@ -143,7 +223,7 @@ def audit_phase0(
             f"{type(exc).__name__}: {exc}", {"agent": (key, spent_on(exc))}
         ) from exc
 
-    return AuditResult(
+    result = AuditResult(
         output=output,
         slither_summary=slither_summary,
         messages=run.messages,
@@ -153,6 +233,11 @@ def audit_phase0(
         n_refuted=sum(f.verdict == "refuted" for f in output.findings),
         usage={"agent": (key, run.usage)},
     )
+    checks = {
+        f.id: _check_poc(ctx, f.poc_path) for f in output.findings if f.verdict == "confirmed"
+    }
+    reconcile_confirmations(result, checks)
+    return result
 
 
 # Back-compat alias: the Phase 0 entry point.
@@ -285,6 +370,18 @@ def verify_finding(
     # different models read the same instruction differently, and the sweep
     # compares those models directly.
     verdict = verdict.capped()
+    if verdict.verdict == "confirmed":
+        check = _check_poc(ctx, verdict.poc_path)
+        if trace:
+            trace({"event": "poc_confirmation", "role": "verifier",
+                   "finding_id": finding.id, "poc_path": verdict.poc_path,
+                   "ran": check.ran, "passed": check.ran and check.passed,
+                   "output": check.output[-4000:]})
+        verdict = _checked_verdict(verdict, check)
+        if verdict.verdict == "confirmed" and verdict.poc_path:
+            verdict = verdict.model_copy(update={
+                "poc_path": ctx.rel(ctx.resolve(_normalize_ws_path(verdict.poc_path))),
+            })
     return verdict, budget.used, run.usage
 
 
@@ -357,7 +454,8 @@ def _render_report(
                 f"Severity is capped at {DEPLOYMENT_CONTINGENT_MAX} for that reason."
             )
         lines += [
-            f"- **PoC:** `{v.poc_path}` (proven in {v.attempts} executed forge run(s))",
+            f"- **PoC:** `{v.poc_path}` (independently checked; "
+            f"{v.attempts} agent test attempt(s))",
             f"- **Evidence:** {v.evidence or '(none recorded)'}",
         ]
         if e and e.remediation.strip():
@@ -491,7 +589,7 @@ def audit_phase1(
         findings=phase0_findings,
         report_markdown=_render_report(by_id, verdicts),
     )
-    return AuditResult(
+    result = AuditResult(
         output=output,
         slither_summary=slither_summary,
         messages=finder_run.messages,
@@ -504,6 +602,18 @@ def audit_phase1(
         poc_attempts=attempts,
         usage={"finder": (finder_key, finder_usage), "verifier": (verifier_key, verifier_usage)},
     )
+    # Verifiers share files even though their model conversations are isolated.
+    # A later verifier may overwrite an earlier PoC or change its inputs, so
+    # validate the final workspace before passing anything to the reporter.
+    reconcile_confirmations(result, {
+        f.id: _check_poc(ctx, f.poc_path)
+        for f in result.output.findings if f.verdict == "confirmed"
+    })
+    _quarantine_unconfirmed(ctx, {
+        f.poc_path for f in result.output.findings
+        if f.verdict == "confirmed" and f.poc_path
+    })
+    return result
 
 
 # --- Phase 2: finder -> verifier -> reporter ---------------------------------

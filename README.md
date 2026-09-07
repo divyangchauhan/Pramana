@@ -59,16 +59,16 @@ The example above writes:
 | Independent PoC reruns | `runs/example/workspaces/reentrancy-vault/grade/` |
 | Structured trace | `runs/example/traces/<run-id>/reentrancy-vault.jsonl` |
 
-Reports include confirmed findings and a separate section for claims that need human review. Refuted claims remain in the evaluation data. The report header distinguishes the verifier's confirmed count from the number of PoCs that passed the harness's independent rerun.
+Reports include confirmed findings and a separate section for claims that need human review. Refuted claims remain in the evaluation data. A confirmation requires a passing PoC check. If the harness cannot reproduce it against the original contract, the finding becomes inconclusive and the report and counts are updated. The evaluation data retains the pre-grading verdict and the failure reason.
 
 For an example of the output, see this [saved reentrancy report](baselines/phase-1-8693741ffa57/reports/run-1/reentrancy-vault.md). Its test deposited 1 ETH into a vault holding another depositor's 5 ETH, then re-entered `withdraw()` and drained the vault. The report records the location, hypothesis, PoC path, and observed result.
 
 ## How it works
 
 1. **Finder.** Slither supplies initial leads. The finder reads the contract and proposes claims. It can read files and run Slither, but cannot write tests or execute them.
-2. **Verifier.** Each claim gets a fresh model conversation containing the contract, location, vulnerability class, and hypothesis. Finder notes and severity guesses are withheld. The verifier can write and run Foundry tests, then return `confirmed`, `refuted`, or `inconclusive`.
+2. **Verifier.** Each claim gets a fresh model conversation containing the contract, location, vulnerability class, and hypothesis. Finder notes and severity guesses are withheld. The verifier can write and run Foundry tests, then return `confirmed`, `refuted`, or `inconclusive`. Before accepting a confirmation, the pipeline independently runs the final PoC. Missing, failing, or unexecutable tests leave the claim inconclusive. The split pipeline rechecks confirmed PoCs after all verifiers finish, so later file edits cannot invalidate an earlier result silently.
 3. **Reporter.** The reporter writes descriptions, impact, and remediation, and can annotate possible duplicates. The renderer takes severity, verdicts, PoC paths, and counts from structured results. If the reporter fails, the pipeline falls back to a report built directly from those results.
-4. **Evaluation.** The harness copies each confirmed PoC into a fresh workspace containing the original contract source and reruns it. A true positive requires a passing test and a match to an unclaimed known bug label.
+4. **Evaluation.** The harness copies each confirmed PoC into a fresh workspace containing the original contract source and reruns it. Failed checks move the claim to human review; the report is rebuilt from the corrected verdicts. Grading uses the same execution results. A true positive requires a passing test and a match to an unclaimed known bug label.
 
 The CLI keeps the original pipeline names for comparing implementations:
 
@@ -84,7 +84,7 @@ The finder, verifier, and reporter are named Anumana, Khandana, and Nirnaya in t
 
 The bundled corpus contains nine vulnerable fixtures with 14 labeled bugs across 11 vulnerability classes, plus nine patched counterparts. Each vulnerable fixture includes reference exploits. Tests check that patches stop the original attacks while preserving normal behavior.
 
-The current corpus fingerprint is `776da97f2e2d`, with grader version `3`. The reference self-check produces:
+The current corpus fingerprint is `776da97f2e2d`, with grader version `4`. The reference self-check produces:
 
 ```text
 HEADLINE — true-positive findings confirmed with executable PoCs: 14 / 14 known bugs
@@ -134,7 +134,7 @@ The application loads `.env` automatically. Exported environment variables take 
 
 Use `--model` to override the selected provider's [default model](pramana/config.py). `--finder-model`, `--verifier-model`, and `--reporter-model` select models for individual roles on that provider. Python callers can assign different providers through `AgentConfig` and `ModelProfile`.
 
-`--max-turns` limits model turns, and `--max-poc-attempts` limits test-tool calls per verification. `--forge-timeout` and `--forge-retries` control test execution. Slither output and Foundry compilation are cached; use `--no-slither-cache` and `--no-forge-cache` to disable them.
+`--max-turns` limits model turns, and `--max-poc-attempts` limits test-tool calls per verification. Independent confirmation checks run outside that attempt budget and make additional Foundry calls. `--forge-timeout` and `--forge-retries` also apply to those checks. Slither output and Foundry compilation are cached; use `--no-slither-cache` and `--no-forge-cache` to disable them.
 
 Usage is reported per role. Cost estimates use the dated table in [pramana/cost.py](pramana/cost.py). Unknown prices and gateway billing appear as `null`; gateway notional costs are estimates at list price, not actual charges.
 
@@ -155,7 +155,6 @@ Workspace creation copies top-level `src/*.sol` files into the shared Foundry te
 The three agent roles, provider routing, caches, structured traces, paired fixtures, and baseline comparison are implemented. A check against the original design plan found these remaining gaps:
 
 - **Public benchmarks:** the repository does not contain the planned Code4rena, Sherlock, DeFiHackLabs, EVMbench, or Kleros integrations. The bundled examples do not establish performance on large production repositories.
-- **Confirmation enforcement:** the verifier's structured verdict can say `confirmed` without a recorded passing test. The harness rejects a missing or failing PoC from its score, but does not revise that verdict in the report body. Check the independent PoC result as well as the verdict.
 - **Interrupted verification:** a verifier that exhausts its model-turn budget or raises a provider error aborts that fixture's audit. It does not currently preserve the partial audit and mark only the affected claim `inconclusive`.
 - **Model preflight:** adapters check model availability where the endpoint supports it. They do not establish tool-calling and structured-output support before a run.
 

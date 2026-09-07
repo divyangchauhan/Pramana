@@ -38,6 +38,7 @@ from pramana.pipeline import (
 )
 from pramana.providers.base import LLMResponse, ToolCall
 from pramana.tools.files import ToolContext
+from pramana.tools.foundry import ForgeResult
 from pramana.tools.registry import build_tool_registry, dispatch
 
 FINDING = Finding(
@@ -316,6 +317,14 @@ def _config() -> AgentConfig:
     return AgentConfig(agent=ModelProfile(provider="anthropic", model="m"), max_poc_attempts=2)
 
 
+def _passing_poc(ws, monkeypatch):
+    (ws / "test" / "F-001.t.sol").write_text("// scripted PoC")
+    monkeypatch.setattr(
+        "pramana.pipeline.forge_test",
+        lambda *a, **kw: ForgeResult(True, True, "1 passed; 0 failed"),
+    )
+
+
 def test_audit_phase1_wires_finder_to_verifier_and_isolates_context(tmp_path, monkeypatch):
     monkeypatch.setattr("pramana.pipeline._ground", lambda ctx, path: "(slither stub)")
 
@@ -331,6 +340,7 @@ def test_audit_phase1_wires_finder_to_verifier_and_isolates_context(tmp_path, mo
     adapter = ScriptedAdapter(replies=[finder_reply, verifier_reply])
     ws = tmp_path / "ws"
     (ws / "test").mkdir(parents=True)
+    _passing_poc(ws, monkeypatch)
 
     result = audit_phase1(
         {"anthropic": adapter},
@@ -422,6 +432,7 @@ def test_audit_phase1_caps_a_deployment_contingent_verdict(tmp_path, monkeypatch
     )
     ws = tmp_path / "ws"
     (ws / "test").mkdir(parents=True)
+    _passing_poc(ws, monkeypatch)
 
     result = audit_phase1(
         {"anthropic": ScriptedAdapter(replies=[finder_reply, verifier_reply])},
@@ -501,6 +512,7 @@ def test_audit_phase1_runs_one_verifier_per_finding(tmp_path, monkeypatch):
     )
     ws = tmp_path / "ws"
     (ws / "test").mkdir(parents=True)
+    _passing_poc(ws, monkeypatch)
 
     result = audit_phase1(
         {"anthropic": adapter}, _config(), ToolContext(workspace=ws), "src/A.sol"

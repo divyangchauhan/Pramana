@@ -34,6 +34,7 @@ from pramana.pipeline import (
 )
 from pramana.providers.base import LLMResponse
 from pramana.tools.files import ToolContext
+from pramana.tools.foundry import ForgeResult
 
 FINDING = Finding(
     id="F-001",
@@ -296,6 +297,11 @@ def _run_phase2(reporter, tmp_path, monkeypatch):
     adapter = RoleAdapter(finder=_FINDER_REPLY, verifier=_VERIFIER_REPLY, reporter=reporter)
     ws = tmp_path / "ws"
     (ws / "test").mkdir(parents=True)
+    (ws / "test" / "F-001.t.sol").write_text("// scripted PoC")
+    monkeypatch.setattr(
+        "pramana.pipeline.forge_test",
+        lambda *a, **kw: ForgeResult(True, True, "1 passed; 0 failed"),
+    )
     result = audit_phase2(
         {"anthropic": adapter}, _config(), ToolContext(workspace=ws), "src/Vault.sol"
     )

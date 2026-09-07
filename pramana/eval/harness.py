@@ -64,7 +64,9 @@ from .workspace import (
 #   2 — per-bug `accepts` aliases; primary-class matches take precedence.
 #   3 — labels resolve by specificity (qualifier tier, then needle length)
 #       instead of by the synonym map's declaration order.
-GRADER_VERSION = 3
+#   4 — a nonzero Forge exit cannot count as a passing PoC even if its output
+#       includes a passing test summary.
+GRADER_VERSION = 4
 
 # Canonical vulnerability class -> substrings that should map to it.
 #
@@ -212,14 +214,14 @@ class FixtureRow:
 def _verify_poc(
     fixture: Fixture, poc_file: Path | None, grading_dir: Path, timeout: int, retries: int
 ) -> ForgeResult:
-    if poc_file is None or not poc_file.exists():
+    if poc_file is None or not poc_file.is_file():
         return ForgeResult(ran=False, passed=False, output="PoC file not found")
-    ws = build_workspace(fixture, grading_dir)  # pristine target source
-    dest = ws / "test" / poc_file.name
-    dest.write_text(poc_file.read_text())
     try:
+        ws = build_workspace(fixture, grading_dir)  # pristine target source
+        dest = ws / "test" / poc_file.name
+        dest.write_text(poc_file.read_text())
         return forge_test(ws, f"test/{poc_file.name}", timeout=timeout, retries=retries)
-    except ToolError as exc:  # forge missing / persistent flakiness -> not a pass
+    except (ToolError, OSError, UnicodeError) as exc:
         return ForgeResult(ran=False, passed=False, output=f"forge error: {exc}")
 
 
@@ -231,6 +233,7 @@ def grade(
     *,
     forge_timeout: int = 300,
     forge_retries: int = 2,
+    poc_results: dict[str, ForgeResult] | None = None,
 ) -> FixtureRow:
     known = fixture.known_bugs
     matched_bug_ids: set[str] = set()
@@ -247,10 +250,15 @@ def grade(
         poc_ran = poc_passed = False
         if probe.verdict == "confirmed":
             n_confirmed += 1
-            res = _verify_poc(
-                fixture, probe.poc_file, grading_root / probe.id, forge_timeout, forge_retries
-            )
-            poc_ran, poc_passed = res.ran, res.passed
+            # Live audits already reran the PoCs before reconciling the report.
+            # Reuse those exact results so grading cannot contradict delivery
+            # because a second execution happened to behave differently.
+            res = poc_results.get(probe.id) if poc_results is not None else None
+            if res is None:
+                res = _verify_poc(
+                    fixture, probe.poc_file, grading_root / probe.id, forge_timeout, forge_retries
+                )
+            poc_ran, poc_passed = res.ran, res.ran and res.passed
             confirmed_pass += int(poc_passed)
 
         matched: KnownBug | None = None
@@ -377,6 +385,7 @@ def run_agent_eval(
         audit_phase0,
         audit_phase1,
         audit_phase2,
+        reconcile_confirmations,
     )
 
     label = config.label(pipeline)
@@ -466,14 +475,34 @@ def run_agent_eval(
             )
             continue
         probes = probes_from_audit(result.output, audit_ws)
+        poc_results = {
+            probe.id: _verify_poc(
+                fx, probe.poc_file, work_root / fx.name / "grade" / probe.id,
+                forge_timeout, forge_retries,
+            )
+            for probe in probes if probe.verdict == "confirmed"
+        }
+        reconcile_confirmations(result, poc_results)
         row = grade(
             fx,
-            probes,
+            probes_from_audit(result.output, audit_ws),
             work_root / fx.name / "grade",
             label,
             forge_timeout=forge_timeout,
             forge_retries=forge_retries,
+            poc_results=poc_results,
         )
+        # Preserve the rejected claim and the independent failure reason for
+        # inspection, while the effective verdict and counts agree with the report.
+        original = {p.id: p.verdict for p in probes}
+        findings_by_id = {f.id: f for f in result.output.findings}
+        for detail in row.details:
+            detail["pre_grading_verdict"] = original[detail["id"]]
+            detail["evidence"] = findings_by_id[detail["id"]].evidence
+            if detail["id"] in poc_results:
+                check = poc_results[detail["id"]]
+                detail["poc_ran"] = check.ran
+                detail["poc_passed"] = check.ran and check.passed
         row.report_markdown = result.output.report_markdown
         if trace:
             trace({"event": "fixture_complete", "pipeline": pipeline,
