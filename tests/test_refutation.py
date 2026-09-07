@@ -19,6 +19,7 @@ import pytest
 from pramana.config import AgentConfig, ModelProfile
 from pramana.eval.refutation import PROBES, ProbeCase, run_probes
 from pramana.providers.base import LLMResponse
+from pramana.tools.foundry import ForgeResult
 
 
 @dataclass
@@ -46,6 +47,11 @@ class ScriptedVerifier:
 
 
 def _run(monkeypatch, tmp_path: Path, verdict: str, cases=None):
+    # These tests isolate the probe's expected-verdict matrix. The independent
+    # execution gate is exercised without this stub in test_confirmation.py.
+    monkeypatch.setattr(
+        "pramana.pipeline._check_poc", lambda *a: ForgeResult(True, True, "scripted proof")
+    )
     adapter = ScriptedVerifier(verdict=verdict)
     monkeypatch.setattr("pramana.providers.build_adapter", lambda p: adapter)
     monkeypatch.setattr("pramana.eval.refutation.build_adapter", lambda p: adapter)

@@ -143,7 +143,7 @@ def _run_once(workspace: Path, match_path: str, timeout: int) -> ForgeResult:
         total_failed += int(failed)
 
     ran = total_passed + total_failed > 0
-    passed = ran and total_failed == 0
+    passed = proc.returncode == 0 and ran and total_failed == 0
     return ForgeResult(ran=ran, passed=passed, output=output)
 
 
